@@ -21,9 +21,28 @@ python3 -m http.server 8000
 Then open http://localhost:8000. The bar at the top switches between the
 landing page, a room, and the big-screen view.
 
+## Android app
+
+`syng-prototype.apk` is the same prototype wrapped as an Android app. It is
+fully offline, asks for no permissions, and needs Android 6 or newer with an
+up-to-date Android System WebView. It is signed with a self-made key for
+sideloading, not for the Play Store, so Android will ask you to allow
+installing from your browser or file manager.
+
+To rebuild it (no Gradle or Android Studio needed):
+
+```sh
+sudo apt-get install aapt apksigner zipalign android-sdk-platform-23 dalvik-exchange
+sh android/build.sh
+```
+
+The result is `android/build/syng-prototype.apk`. The build has been checked
+for a valid signature and manifest but has not been run on a device.
+
 ## What is where
 
 - `web/` the prototype (plain HTML, CSS and JavaScript, no build step)
+- `android/` the Android wrapper: one WebView activity and a build script
 - `PRODUCT.md` what the product is, who it is for, and what is still undecided
 - `DESIGN.md` the visual system: colors, type, layout, components, rules
 - `.impeccable/` design tooling state (surface brief, design tokens sidecar)

@@ -694,6 +694,17 @@
 
   function leaveRoom() { script++; state.room = null; go('landing'); }
 
+  // The Android app calls this for the system back button. Returns "1" when
+  // the press was used here, so the app only closes from the landing page.
+  window.syngBack = () => {
+    const open = document.querySelector('dialog[open]');
+    if (open) { open.close(); return '1'; }
+    if (state.view === 'tv') { go('room'); return '1'; }
+    if (state.view === 'setup') { go('landing'); return '1'; }
+    if (state.view === 'room') { leaveRoom(); return '1'; }
+    return '0';
+  };
+
   // ---------- events ----------
 
   document.addEventListener('click', (ev) => {
