@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>syng</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wdth,wght@50..150,100..900&family=Schibsted+Grotesk:wght@400..900&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- app:start -->
+<nav class="proto" aria-label="Prototype view">
+  <span class="proto-label">Prototype view</span>
+  <div class="proto-tabs">
+    <button type="button" data-go="landing">Landing</button>
+    <button type="button" data-go="host">Host screen</button>
+    <button type="button" data-go="guest">Guest phone</button>
+  </div>
+</nav>
+
+<div id="app"></div>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <form class="sheet-head" id="search-form" role="search">
+    <h2 id="sheet-title">Add a song</h2>
+    <button type="button" class="btn btn-quiet" id="sheet-close">Close</button>
+    <label class="visually-hidden" for="search-input">Search by song or artist</label>
+    <input id="search-input" type="search" inputmode="search" autocomplete="off"
+           placeholder="Search by song or artist">
+  </form>
+  <ul class="results" id="results"></ul>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<!-- app:end -->
+<script src="vendor/qrcode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
