@@ -61,20 +61,27 @@ Confirmed:
 Terminology: room, room code, queue, add, bump (move a song up), pick
 ("Maya's pick").
 
-Undecided, and not to be invented by design work:
+Built in version 0.2 (see README for what is tested):
 
-- How audio reaches one shared speaker when consecutive songs play from
-  different people's accounts.
-- What a remote listener hears when the song comes from a service they do not
-  have.
-- Whether bumping, skipping and removing are open to everyone or host-only.
-  The prototype uses a placeholder: anyone can bump, the host can pause, skip
-  and remove any song, and a person can skip or remove their own.
-- Which services are supported at launch. Research on 2026-10-06 found that
-  only Apple Music and YouTube currently offer third-party playback that a new
-  app can use; Spotify limits new apps to five users, and Tidal and Amazon
-  Music restrict full playback to approved partners. Any service list in the
-  prototype is illustrative.
+- The host's phone runs the room and serves it to everyone on the same Wi-Fi.
+  A standalone server covers people who are apart.
+- Search and 30-second previews come from Apple's and Deezer's public
+  catalogs. Each person's chosen app is used to open the full song.
+- The host's device is the speaker. Others can turn sound on for themselves.
+- Anyone can add and bump; the host can pause, skip and remove any song; a
+  person can skip or remove their own. These rules were chosen to get a working
+  version and are open to change.
+
+Still undecided:
+
+- Whether full songs can ever play inside the room. A song playing from the
+  account of whoever added it needs each service's developer approval.
+  Research on 2026-10-06 found that only Apple Music and YouTube currently
+  offer third-party playback that a new app can use; Spotify limits new apps to
+  five users, and Tidal and Amazon Music restrict full playback to approved
+  partners.
+- Whether to host a public server so the app works for people who are apart
+  without anyone running their own.
 
 ## Brand Commitments
 
@@ -88,8 +95,8 @@ Undecided, and not to be invented by design work:
 ## Evidence on Hand
 
 None. There are no users, testimonials, partner agreements or usage numbers.
-All songs, people and rooms in the prototype are synthetic examples. Do not
-show streaming service logos; name services in text.
+Songs and cover art are real catalog data. Do not show streaming service
+logos; name services in text.
 
 ## Product Principles
 

@@ -1,181 +1,181 @@
-/* syng UI prototype.
-   Everything runs on synthetic data in memory: no backend, no sign-in, no sound.
-   The "store" section is the seam where a real room service plugs in later. */
+/* syng web client.
+   Talks to the syng server (server/ in this repo) that runs inside the Android
+   app or standalone. The server owns the room; this file shows it, sends
+   actions, and plays the 30-second previews on the host's device. */
 (() => {
   'use strict';
 
-  // ---------- synthetic data ----------
+  // ---------- music apps and catalogs ----------
 
-  // Illustrative list. Which services launch is undecided (see PRODUCT.md).
-  const SERVICES = [
-    { id: 'spotify', name: 'Spotify' },
-    { id: 'apple', name: 'Apple Music' },
-    { id: 'ytm', name: 'YouTube Music' },
-    { id: 'tidal', name: 'Tidal' },
-    { id: 'amazon', name: 'Amazon Music' },
-    { id: 'soundcloud', name: 'SoundCloud' },
+  // The app a person listens with. Used to open the full song there.
+  const APPS = [
+    { id: 'spotify', name: 'Spotify', search: (q) => 'https://open.spotify.com/search/' + encodeURIComponent(q) },
+    { id: 'apple', name: 'Apple Music', search: (q) => 'https://music.apple.com/search?term=' + encodeURIComponent(q) },
+    { id: 'ytm', name: 'YouTube Music', search: (q) => 'https://music.youtube.com/search?q=' + encodeURIComponent(q) },
+    { id: 'tidal', name: 'Tidal', search: (q) => 'https://listen.tidal.com/search?q=' + encodeURIComponent(q) },
+    { id: 'amazon', name: 'Amazon Music', search: (q) => 'https://music.amazon.com/search/' + encodeURIComponent(q) },
+    { id: 'deezer', name: 'Deezer', search: (q) => 'https://www.deezer.com/search/' + encodeURIComponent(q) },
+    { id: 'soundcloud', name: 'SoundCloud', search: (q) => 'https://soundcloud.com/search?q=' + encodeURIComponent(q) },
   ];
-  const ALL = SERVICES.map((s) => s.id);
-  const serviceName = (id) => (SERVICES.find((s) => s.id === id) || {}).name || id;
+  const appOf = (id) => APPS.find((a) => a.id === id) || APPS[0];
+  const appName = (id) => appOf(id).name;
 
-  // Real, well-known songs are treated as available everywhere. The three
-  // single-service entries are invented, so no real availability is claimed.
-  const CATALOG = [
-    ['Dancing Queen', 'ABBA', 231], ['Mr. Brightside', 'The Killers', 223],
-    ['Hey Ya!', 'OutKast', 235], ['Levitating', 'Dua Lipa', 203],
-    ['September', 'Earth, Wind & Fire', 215], ["Don't Stop Me Now", 'Queen', 209],
-    ['Blinding Lights', 'The Weeknd', 200], ['Valerie', 'Mark Ronson and Amy Winehouse', 219],
-    ['Pink + White', 'Frank Ocean', 184], ['Espresso', 'Sabrina Carpenter', 175],
-    ['Take On Me', 'a-ha', 225], ['Dreams', 'Fleetwood Mac', 257],
-    ['Got to Be Real', 'Cheryl Lynn', 225], ['Electric Feel', 'MGMT', 229],
-    ['Juice', 'Lizzo', 195], ['I Wanna Dance with Somebody (Who Loves Me)', 'Whitney Houston', 291],
-    ['Redbone', 'Childish Gambino', 327], ['Crazy in Love', 'Beyoncé', 236],
-    ['Heat Waves', 'Glass Animals', 239], ['Lovely Day', 'Bill Withers', 255],
-    ['Rasputin', 'Boney M.', 280], ['Jai Ho', 'A. R. Rahman', 319],
-    ['Despacito', 'Luis Fonsi', 229], ['Murder on the Dancefloor', 'Sophie Ellis-Bextor', 230],
-    ['Basement Session No. 4', 'The Night Buses', 268, ['ytm']],
-    ['Rooftop Mix 012', 'okra', 412, ['soundcloud']],
-    ['Daylight Savings (Demo)', 'Lena Marsh', 198, ['tidal']],
-  ].map(([title, artist, secs, on], id) => ({ id, title, artist, secs, on: on || ALL }));
-  const song = (title) => CATALOG.find((s) => s.title === title);
+  // The public catalogs search and previews come from.
+  const CATALOGS = { apple: 'Apple Music', deezer: 'Deezer' };
 
-  const PERSON_COLORS = ['coral', 'sky', 'mint', 'lilac', 'peach', 'pink', 'teal'];
-  const ME = 'me'; // this device's person id; other people get their own ids
+  /** Where to hear the whole song: the exact track when the person's app is its catalog, otherwise a search there. */
+  function fullSongUrl(song, appId) {
+    if (appId === song.src && song.url) return song.url;
+    return appOf(appId).search(song.title + ' ' + song.artist);
+  }
 
-  // ---------- device preferences ----------
+  // ---------- this device ----------
 
-  const prefs = {
-    read() { try { return JSON.parse(localStorage.getItem('syng.me') || 'null') || {}; } catch (_) { return {}; } },
-    write(v) { try { localStorage.setItem('syng.me', JSON.stringify(v)); } catch (_) { /* private mode */ } },
+  const store = {
+    read() { try { return JSON.parse(localStorage.getItem('syng') || 'null') || {}; } catch (_) { return {}; } },
+    write(v) { try { localStorage.setItem('syng', JSON.stringify(v)); } catch (_) { /* private mode */ } },
   };
+  const saved = store.read();
+  function newToken() {
+    const bytes = new Uint8Array(18);
+    (window.crypto || window.msCrypto).getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  const device = {
+    token: saved.token || newToken(),
+    name: saved.name || '',
+    app: saved.app || '',
+    room: saved.room || '',      // the room to come back to after a reload
+    home: saved.home || '',      // where "leave" returns to when this page is another phone's server
+  };
+  const persist = () => store.write(device);
+  persist();
 
-  // ---------- store ----------
+  // ---------- state ----------
 
-  let keySeq = 0;
-  let script = 0; // bumps whenever the room changes, cancelling old scripted events
-
-  const state = {
-    view: 'landing',     // landing | setup | room | tv
+  const ui = {
+    view: 'loading',             // loading | landing | setup | room | tv
     setup: { mode: 'start', code: '', busy: false },
-    room: null,          // { code, hostId }
-    me: { name: prefs.read().name || '', services: prefs.read().services || [] },
-    people: [],          // { id, name, label, service, color, host }
-    now: null,           // queue entry + { elapsed }
-    playing: false,
-    queue: [],
-    scope: 'mine',       // 'mine' | 'all' | service id
-    loading: false,
-    connecting: null,
+    info: { lan: false, canStart: true, addresses: [], port: 0, code: null, local: false },
+    me: null,                    // my id in the room
+    room: null,                  // latest state from the server
+    receivedAt: 0,               // local clock when that state arrived
+    online: true,
+    listening: false,            // non-hosts can choose to hear the previews too
+    needsTap: false,             // the browser wants a tap before it will play sound
+    scope: 'all',
+    search: { q: '', loading: false, songs: [], failed: [], error: '' },
+    adding: new Set(),
     justAdded: null,
     tvRows: 5,
+    notice: '',
   };
 
-  const myService = () => state.me.services[0];
-  const person = (id) => state.people.find((p) => p.id === id);
-  const labelOf = (id) => (person(id) || {}).label || 'Someone';
+  const person = (id) => (ui.room ? ui.room.people.find((p) => p.id === id) : null);
+  const nameOf = (id) => (person(id) || {}).name || 'Someone';
   const colorOf = (id) => (person(id) || {}).color || 'sky';
-  const isHost = () => !!state.room && state.room.hostId === ME;
-  const pickLabel = (id) => (id === ME ? 'Your pick' : labelOf(id) + '’s pick');
-  const fromLabel = (e) => (e.by === ME
-    ? 'Playing from your ' + serviceName(e.service)
-    : 'Playing from ' + labelOf(e.by) + '’s ' + serviceName(e.service));
+  const isHost = () => !!ui.room && ui.room.hostId === ui.me;
+  const isPlayer = () => isHost() || ui.listening;
+  const pickLabel = (id) => (id === ui.me ? 'Your pick' : nameOf(id) + '’s pick');
+  const myApp = () => (person(ui.me) || {}).app || device.app || 'spotify';
 
-  // Two people can share a name, so identity is the id and the label is made unique.
-  function addPerson(id, name, service, host) {
-    if (person(id)) return;
-    const same = state.people.filter((p) => p.name.toLowerCase() === name.toLowerCase()).length;
-    state.people.push({
-      id, name, label: same ? `${name} (${same + 1})` : name, service, host: !!host,
-      color: PERSON_COLORS[state.people.length % PERSON_COLORS.length],
-    });
-  }
-  const entry = (title, by, service, bumps = []) => ({
-    key: 'e' + (++keySeq), song: song(title), by, service, bumps: new Set(bumps), at: keySeq,
-  });
-  const sortQueue = () => state.queue.sort((a, b) => b.bumps.size - a.bumps.size || a.at - b.at);
-  const inRoom = (id) => (state.now && state.now.song.id === id) || state.queue.some((q) => q.song.id === id);
+  // ---------- server ----------
 
-  function addSong(id, by, service) {
-    const e = { key: 'e' + (++keySeq), song: CATALOG[id], by, service, bumps: new Set(), at: keySeq };
-    if (!state.now) { state.now = { ...e, elapsed: 0 }; state.playing = true; }
-    else { state.queue.push(e); sortQueue(); state.justAdded = e.key; }
-    refresh();
-    return e;
-  }
-  function toggleBump(key) {
-    const e = state.queue.find((q) => q.key === key);
-    if (!e) return;
-    if (e.bumps.has(ME)) e.bumps.delete(ME); else e.bumps.add(ME);
-    sortQueue();
-    refresh();
-  }
-  function removeSong(key) {
-    const i = state.queue.findIndex((q) => q.key === key);
-    if (i < 0) return;
-    const [gone] = state.queue.splice(i, 1);
-    refresh();
-    toast('Removed ' + gone.song.title, 'Undo', () => {
-      if (inRoom(gone.song.id)) return;
-      state.queue.push(gone); sortQueue(); state.justAdded = gone.key; refresh();
-    });
-  }
-  function skip() {
-    const next = state.queue.shift();
-    state.now = next ? { ...next, elapsed: 0 } : null;
-    state.playing = !!next;
-    refresh();
+  class ApiError extends Error {
+    constructor(message, status) { super(message); this.status = status; }
   }
 
-  // A room that already has people in it: what you see when you join a friend.
-  function loadFriendsRoom(code) {
-    script++;
-    state.room = { code: code || 'KQ7M', hostId: 'maya' };
-    state.people = [];
-    addPerson('maya', 'Maya', 'spotify', true); addPerson('dev', 'Dev', 'ytm'); addPerson('priya', 'Priya', 'apple');
-    addPerson('sam', 'Sam', 'tidal'); addPerson('jo', 'Jo', 'spotify');
-    addPerson(ME, state.me.name, myService());
-    state.now = { ...entry('September', 'maya', 'spotify'), elapsed: 73 };
-    state.playing = true;
-    state.queue = [
-      entry('Hey Ya!', 'dev', 'ytm', ['maya', 'sam', 'jo']),
-      entry('Dreams', 'priya', 'apple', ['dev', 'maya']),
-      entry('Levitating', 'sam', 'tidal', ['jo']),
-      entry('Mr. Brightside', 'jo', 'spotify', ['dev']),
-      entry('Pink + White', 'maya', 'spotify'),
-      entry('Basement Session No. 4', 'dev', 'ytm'),
-    ];
-    later(14000, () => {
-      if (inRoom(song('Espresso').id)) return;
-      addSong(song('Espresso').id, 'priya', 'apple');
-      toast('Priya added Espresso');
-    });
+  async function api(path, body, opts = {}) {
+    let res;
+    try {
+      res = await fetch((opts.base || '') + path, {
+        method: body ? 'POST' : 'GET',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: opts.signal,
+        cache: 'no-store',
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      throw new ApiError('Can’t reach the room. Check your Wi-Fi.', 0);
+    }
+    let data = {};
+    try { data = await res.json(); } catch (_) { /* empty body */ }
+    if (!res.ok) throw new ApiError(data.error || 'Something went wrong. Try again.', res.status);
+    return data;
   }
 
-  // A room you just started: empty, then friends arrive.
-  function loadOwnRoom() {
-    script++;
-    const code = Array.from({ length: 4 }, () => 'ABCDEFGHJKMNPQRSTVWXYZ23456789'[Math.floor(Math.random() * 30)]).join('');
-    state.room = { code, hostId: ME };
-    state.people = [];
-    addPerson(ME, state.me.name, myService(), true);
-    state.now = null; state.playing = false; state.queue = [];
-    later(7000, () => { addPerson('maya', 'Maya', 'spotify'); refresh(); toast(labelOf('maya') + ' joined'); });
-    later(12000, () => { if (!inRoom(song('September').id)) { addSong(song('September').id, 'maya', 'spotify'); toast(labelOf('maya') + ' added September'); } });
-    later(19000, () => { addPerson('dev', 'Dev', 'ytm'); refresh(); toast(labelOf('dev') + ' joined'); });
-    later(24000, () => { if (!inRoom(song('Hey Ya!').id)) { addSong(song('Hey Ya!').id, 'dev', 'ytm'); toast(labelOf('dev') + ' added Hey Ya!'); } });
+  const act = (type, extra) =>
+    api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type, ...extra })
+      .catch((e) => { toast(e.message); throw e; });
+
+  let events = null;
+  function connect(code) {
+    disconnect();
+    events = new EventSource(`/api/rooms/${code}/events?token=${device.token}`);
+    events.onmessage = (ev) => {
+      const data = JSON.parse(ev.data);
+      const first = !ui.room;
+      ui.me = data.me;
+      ui.room = data.state;
+      ui.receivedAt = Date.now();
+      setOnline(true);
+      // Inside the Android app, keep the host's screen on so the room keeps running.
+      if (window.SyngNative && window.SyngNative.keepAwake) window.SyngNative.keepAwake(isHost());
+      if (ui.view !== 'room' && ui.view !== 'tv') { ui.view = 'room'; render(); } else refresh(first);
+      syncPlayer();
+    };
+    events.onerror = () => {
+      setOnline(false);
+      // The browser retries on its own. If the server refused us outright, the
+      // stream is closed for good: find out why.
+      if (events && events.readyState === EventSource.CLOSED) recover(code);
+    };
+  }
+  function disconnect() {
+    if (events) { events.close(); events = null; }
   }
 
-  function later(ms, fn) {
-    const mine = script;
-    setTimeout(() => { if (mine === script && state.room) fn(); }, ms);
+  let recovering = false;
+  async function recover(code) {
+    if (recovering) return;
+    recovering = true;
+    try {
+      await api(`/api/rooms/${code}/join`, { token: device.token, name: device.name, app: device.app });
+      connect(code);
+    } catch (e) {
+      if (e.status === 404) return roomEnded('That room has ended.');
+      if (e.status === 409) return roomEnded(e.message);
+      setTimeout(() => { recovering = false; if (ui.room && ui.room.code === code) recover(code); }, 2500);
+      return;
+    }
+    recovering = false;
+  }
+
+  function roomEnded(message) {
+    recovering = false;
+    disconnect();
+    stopPlayer();
+    ui.room = null; ui.me = null;
+    device.room = ''; persist();
+    ui.notice = message || '';
+    goHome();
+  }
+
+  function setOnline(on) {
+    if (ui.online === on) return;
+    ui.online = on;
+    const b = $('#banner');
+    b.hidden = on;
+    b.textContent = on ? '' : 'Reconnecting to the room';
   }
 
   // ---------- helpers ----------
 
   const $ = (sel, root = document) => root.querySelector(sel);
-  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const clock = (secs) => Math.floor(secs / 60) + ':' + String(Math.floor(secs % 60)).padStart(2, '0');
+  const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
   const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
   const people = (n) => (n === 1 ? '1 person' : n + ' people');
   const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -192,12 +192,20 @@
     play: svg('<path d="M6.5 4.5v11l9-5.5z" fill="currentColor"/>'),
     pause: svg('<path d="M7 4.5v11M13 4.5v11" stroke-width="2.6"/>'),
     skip: svg('<path d="M5 4.5v11l8-5.5z" fill="currentColor"/><path d="M15.5 4.5v11" stroke-width="2.2"/>'),
+    sound: svg('<path d="M3.5 8v4H6l4 3.5v-11L6 8z" fill="currentColor"/><path d="M13 7.5c.9.7 1.4 1.5 1.4 2.5s-.5 1.8-1.4 2.5M15 5c1.700 1.300 2.600 3 2.600 5s-.900 3.700-2.600 5"/>'),
+    open: svg('<path d="M11 4h5v5M16 4l-7 7M14 11.500V15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3.500"/>'),
     tv: svg('<rect x="2.5" y="4" width="15" height="10" rx="1.5"/><path d="M7 17h6"/>'),
     copy: svg('<rect x="7" y="7" width="9.5" height="9.5" rx="2"/><path d="M4 12.5v-7A1.5 1.5 0 0 1 5.5 4h7"/>'),
   };
 
-  // Abstract cover tiles. Hue and shape come from the song's place in the
-  // catalog, so no two songs share a tile. Synthetic stand-ins, not real art.
+  // Cover art comes from the catalog. If a song has none, or the image fails,
+  // an abstract tile drawn from the title stands in.
+  function hueOf(song) {
+    let h = 0;
+    const t = (song.title || '') + (song.artist || '');
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
   const SHAPES = [
     (a, b, g) => `<circle cx="24" cy="24" r="17" fill="${a}"/><circle cx="24" cy="24" r="9" fill="${b}"/><circle cx="24" cy="24" r="2.5" fill="${g}"/>`,
     (a, b) => `<rect x="6" y="26" width="8" height="16" fill="${a}"/><rect x="20" y="14" width="8" height="28" fill="${b}"/><rect x="34" y="20" width="8" height="22" fill="${a}"/>`,
@@ -207,23 +215,23 @@
     (a, b) => `<rect y="10" width="48" height="8" fill="${a}"/><rect y="24" width="48" height="8" fill="${b}"/><rect y="38" width="48" height="4" fill="${a}"/>`,
     (a, b) => `<circle cx="16" cy="24" r="12" fill="${a}"/><circle cx="32" cy="24" r="12" fill="${b}" fill-opacity=".85"/>`,
     (a, b) => `<path d="M24 6l18 36H6z" fill="${a}"/><circle cx="24" cy="31" r="6" fill="${b}"/>`,
-    (a, b) => `<rect x="8" y="8" width="32" height="32" fill="${a}"/><rect x="16" y="16" width="16" height="16" fill="${b}"/>`,
   ];
-  function coverHue(s) {
-    if (s.id != null) return (s.id * 47 + 18) % 360;
-    let h = 0;
-    for (const ch of s.title) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    return h % 360;
-  }
-  function cover(s) {
-    const known = s.id != null ? s : song(s.title) || s;
-    const hue = coverHue(known), kind = known.id != null ? known.id % SHAPES.length : hue % SHAPES.length;
+  function tile(song) {
+    const hue = hueOf(song);
     const bg = `hsl(${hue} 44% 36%)`, a = `hsl(${(hue + 28) % 360} 62% 66%)`, b = `hsl(${(hue + 320) % 360} 55% 52%)`;
-    return `<span class="cover"><svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" fill="${bg}"/>${SHAPES[kind](a, b, bg)}</svg></span>`;
+    return `<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" fill="${bg}"/>${SHAPES[(hue >> 3) % SHAPES.length](a, b, bg)}</svg>`;
   }
+  function cover(song, big) {
+    const src = big ? song.artBig || song.art : song.art;
+    return `<span class="cover">${tile(song)}${src ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>`;
+  }
+  // A broken image removes itself and the tile underneath shows.
+  document.addEventListener('error', (ev) => {
+    if (ev.target.tagName === 'IMG' && ev.target.closest('.cover')) ev.target.remove();
+  }, true);
 
   const avatar = (id, size = '') =>
-    `<span class="avatar ${size}" data-person="${colorOf(id)}" aria-hidden="true">${esc(labelOf(id).trim().charAt(0))}</span>`;
+    `<span class="avatar ${size}" data-person="${colorOf(id)}" aria-hidden="true">${esc(nameOf(id).trim().charAt(0))}</span>`;
 
   let toastTimer;
   function toast(msg, action, onAction) {
@@ -234,81 +242,116 @@
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; onAction(); };
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 5000 : 3000);
+    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 6000 : 3200);
   }
+
+  /** Opens an outside link: through the Android app when we are inside it, otherwise a new tab. */
+  function openOutside(url) {
+    if (window.SyngNative && window.SyngNative.open) window.SyngNative.open(url);
+    else window.open(url, '_blank', 'noopener');
+  }
+
+  // ---------- room codes on a local network ----------
+
+  const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  /** A LAN code holds the last two parts of the host's address and a check digit. */
+  function decodeLanCode(code) {
+    let v = 0;
+    for (const ch of code) { const i = ALPHABET.indexOf(ch); if (i < 0) return null; v = v * 32 + i; }
+    const c = (v >> 12) & 255, d = (v >> 4) & 255, check = v & 15;
+    return check === ((c ^ d ^ (c >> 4) ^ (d >> 4)) & 15) ? { c, d } : null;
+  }
+
+  async function probe(base, code) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 1800);
+    try {
+      const r = await api('/api/rooms/' + code, null, { base, signal: ctl.signal });
+      return !!r.exists;
+    } catch (_) { return false; } finally { clearTimeout(timer); }
+  }
+
+  /** Finds the address of the room with this code: this server first, then the local network. */
+  async function findRoom(code) {
+    if (await probe('', code)) return '';
+    if (!ui.info.lan || !ui.info.local) return null;
+    const where = decodeLanCode(code);
+    if (!where) return null;
+    const tries = [];
+    for (const mine of ui.info.addresses) {
+      const [a, b] = mine.split('.');
+      for (let port = 8787; port <= 8791; port++) tries.push(`http://${a}.${b}.${where.c}.${where.d}:${port}`);
+    }
+    const found = await Promise.all(tries.map((base) => probe(base, code).then((ok) => (ok ? base : null))));
+    return found.find(Boolean) || null;
+  }
+
+  /** The link friends open to join. On the host's own phone that is its Wi-Fi address, not localhost. */
+  function inviteLink() {
+    const loop = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+    const base = loop && ui.info.addresses.length ? `http://${ui.info.addresses[0]}:${ui.info.port}` : location.origin;
+    return `${base}/#join=${ui.room.code}`;
+  }
+  const offWifi = () => ui.info.lan && ui.info.local && !ui.info.addresses.length;
 
   // ---------- views ----------
 
   function landingHTML() {
-    const rows = [
-      ['Hey Ya!', 'OutKast', 'Dev', 'sky', 'YouTube Music'],
-      ['Dreams', 'Fleetwood Mac', 'Priya', 'mint', 'Apple Music'],
-      ['Levitating', 'Dua Lipa', 'Sam', 'lilac', 'Tidal'],
-      ['Mr. Brightside', 'The Killers', 'Jo', 'peach', 'Spotify'],
-    ];
     return `<main class="landing">
       <div class="landing-main">
         <p class="wordmark">syng</p>
         <h1>One queue for everyone’s music.</h1>
-        <p class="landing-lede">Start a room and share the code. Friends add songs from the music app they already use.</p>
+        <p class="landing-lede">Start a room and share the code. Friends add songs from their own phones.</p>
+        ${ui.notice ? `<p class="notice" role="status">${esc(ui.notice)}</p>` : ''}
         <div class="landing-actions">
-          <button type="button" class="btn btn-primary btn-block" id="start-room">Start a room</button>
-          <p class="divider">or join one</p>
+          ${ui.info.canStart ? `<button type="button" class="btn btn-primary btn-block" id="start-room">Start a room</button>
+          <p class="divider">or join one</p>` : ''}
           <form id="join-form" novalidate>
-            <label class="field-label" for="join-code">Room code</label>
+            <label class="field-label" for="join-code">Room code or invite link</label>
             <div class="join-row">
-              <input class="field" id="join-code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="4 characters" aria-describedby="join-error">
-              <button type="submit" class="btn">Join</button>
+              <input class="field" id="join-code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="4 characters" aria-describedby="join-error">
+              <button type="submit" class="btn" id="join-submit">Join</button>
             </div>
             <p class="field-error" id="join-error" role="alert" hidden></p>
           </form>
         </div>
         <ol class="steps">
-          <li><span><b>Start or join a room</b>No account needed. A room is just a code.</span></li>
-          <li><span><b>Pick your music app</b>Search the catalog you already know.</span></li>
-          <li><span><b>Add to the shared queue</b>Each song plays from the account of whoever added it.</span></li>
+          <li><span><b>Start or join a room</b>${ui.info.lan ? 'Everyone on the same Wi-Fi can join. No account needed.' : 'No account needed. A room is just a code.'}</span></li>
+          <li><span><b>Search and add songs</b>Real songs from Apple Music’s and Deezer’s catalogs.</span></li>
+          <li><span><b>Listen together</b>The room plays 30-second previews. Open any song in your own app to hear all of it.</span></li>
         </ol>
       </div>
-      <figure class="sample" aria-label="Example queue">
-        <div class="section-head"><h2>Up next</h2><span>4 songs</span></div>
-        <ul class="list">
-          ${rows.map(([t, a, by, c, app]) => `<li class="row">${cover({ title: t, artist: a })}
-            <div class="row-main"><span class="row-title">${esc(t)}</span><span class="row-artist">${esc(a)}</span>
-            <span class="row-pick"><span class="avatar avatar-sm" data-person="${c}" aria-hidden="true">${by[0]}</span><b>${by}</b><span>${app}</span></span></div></li>`).join('')}
-        </ul>
-        <figcaption class="sample-caption">Example room. Four friends, four different apps, one queue.</figcaption>
-      </figure>
     </main>`;
   }
 
-  function serviceOptions(name, selected) {
-    return `<div class="options">${SERVICES.map((s) => `<label class="option">
+  function appOptions(name, selected) {
+    return `<div class="options">${APPS.map((s) => `<label class="option${selected === s.id ? ' is-checked' : ''}">
       <span>${esc(s.name)}</span>
       <input type="radio" name="${name}" value="${s.id}" ${selected === s.id ? 'checked' : ''}>
       <span class="option-mark">${ICON.check}</span></label>`).join('')}</div>`;
   }
 
   function setupHTML() {
-    const joining = state.setup.mode === 'join';
+    const joining = ui.setup.mode === 'join';
     return `<main class="setup">
       <div class="setup-top"><button type="button" class="iconbtn" id="setup-back" aria-label="Back">${ICON.back}</button><span class="wordmark">syng</span></div>
-      <div><h1>${joining ? 'Join room ' + esc(state.setup.code) : 'Start a room'}</h1>
+      <div><h1>${joining ? 'Join room ' + esc(ui.setup.code) : 'Start a room'}</h1>
         <p class="setup-sub">Two things and you’re in.</p></div>
       <form id="setup-form" novalidate>
         <div>
           <label class="field-label" for="setup-name">Your name</label>
-          <input class="field" id="setup-name" maxlength="16" autocomplete="given-name" value="${esc(state.me.name)}" placeholder="Shown next to the songs you add" aria-describedby="setup-name-error">
+          <input class="field" id="setup-name" maxlength="16" autocomplete="given-name" value="${esc(device.name)}" placeholder="Shown next to the songs you add" aria-describedby="setup-name-error">
           <p class="field-error" id="setup-name-error" role="alert" hidden></p>
         </div>
         <fieldset>
           <legend>Your music app</legend>
-          <p class="legend-help">You’ll search this app’s catalog, and your songs play from your account there.</p>
-          ${serviceOptions('service', myService())}
-          <p class="field-error" id="setup-service-error" role="alert" hidden></p>
+          <p class="legend-help">Full songs open here. You can change it later.</p>
+          ${appOptions('app', device.app)}
+          <p class="field-error" id="setup-app-error" role="alert" hidden></p>
         </fieldset>
         <div class="setup-foot">
           <button type="submit" class="btn btn-primary btn-block" id="setup-submit">${joining ? 'Join room' : 'Start room'}</button>
-          <p>Next you’ll sign in to the app you picked. You can change it later.</p>
+          <p class="field-error" id="setup-error" role="alert" hidden></p>
         </div>
       </form>
     </main>`;
@@ -318,8 +361,8 @@
     return `<main class="room">
       <header class="roombar" id="roombar">
         <div class="roombar-id">
-          <span class="roombar-name">${esc(isHost() ? 'Your room' : labelOf(state.room.hostId) + '’s room')}</span>
-          <span class="roombar-code">Code <b>${esc(state.room.code)}</b></span>
+          <span class="roombar-name" data-slot="roomname"></span>
+          <span class="roombar-code">Code <b>${esc(ui.room.code)}</b></span>
         </div>
         <div class="roombar-actions">
           <button type="button" class="people-btn" id="open-people" data-slot="people"></button>
@@ -332,7 +375,7 @@
           <div data-slot="now"></div>
         </section>
         <section class="room-col" aria-labelledby="next-h">
-          <div class="addbar"><button type="button" class="addbar-btn" id="open-search">${ICON.search}<span data-slot="addlabel"></span></button></div>
+          <div class="addbar"><button type="button" class="addbar-btn" id="open-search">${ICON.search}<span>Add a song</span></button></div>
           <div class="section-head"><h2 id="next-h">Up next</h2><span data-slot="count"></span></div>
           <div data-slot="queue"></div>
         </section>
@@ -350,7 +393,7 @@
           <section class="tv-join" aria-label="How to join">
             <div class="qr" id="tv-qr" role="img" aria-label="QR code to join this room"></div>
             <div><h2>Scan to add songs</h2><p>or enter the room code</p>
-              <p class="invite-code">${esc(state.room.code)}</p></div>
+              <p class="invite-code">${esc(ui.room.code)}</p></div>
           </section>
           <section class="tv-next" aria-labelledby="tv-next">
             <div class="section-head"><h2 id="tv-next">Up next</h2><span data-slot="count"></span></div>
@@ -363,32 +406,34 @@
 
   // ---------- live regions ----------
 
-  const eq = () => `<span class="eq${state.playing ? ' is-on' : ''}" aria-hidden="true"><i></i><i></i><i></i></span>`;
-  const nowHeadHTML = () => (state.now ? `${state.playing ? 'Now playing' : 'Paused'}${eq()}` : 'Now playing');
+  const eq = (on) => `<span class="eq${on ? ' is-on' : ''}" aria-hidden="true"><i></i><i></i><i></i></span>`;
+  const sourceLine = (song) => '30-second preview from ' + (CATALOGS[song.src] || 'the catalog');
 
   function nowHTML() {
-    const n = state.now;
-    if (state.view === 'tv') {
+    const n = ui.room.now;
+    if (ui.view === 'tv') {
       if (!n) return '<div class="tv-idle"><p class="tv-label">Nothing is playing</p><h1 class="tv-title">Scan the code and add the first song.</h1></div>';
-      return `<div class="tv-cover">${cover(n.song)}</div>
-        <div><p class="tv-label">${state.playing ? 'Now playing' : 'Paused'}${eq()}</p>
+      return `<div class="tv-cover">${cover(n.song, true)}</div>
+        <div><p class="tv-label">${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}</p>
           <h1 class="tv-title">${esc(n.song.title)}</h1><p class="tv-artist">${esc(n.song.artist)}</p></div>
-        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(fromLabel(n).replace('Playing from', 'playing from'))}</span></p>
+        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second'))}</span></p>
         ${progressHTML()}`;
     }
     if (!n) return '<div class="empty"><b>Nothing is playing</b>The room starts when someone adds a song.</div>';
-    const mine = n.by === ME;
-    // Placeholder rules, pending a product decision: the host can pause and skip,
-    // and whoever added the current song can skip it.
+    const mine = n.by === ui.me;
+    const app = myApp();
     const actions = [];
-    if (isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${state.playing ? ICON.pause + 'Pause' : ICON.play + 'Play'}</button>`);
+    if (ui.needsTap && isPlayer()) actions.push(`<button type="button" class="btn btn-sm btn-primary" id="tap-sound">${ICON.sound}Turn sound on</button>`);
+    if (isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
     if (isHost() || mine) actions.push(`<button type="button" class="btn btn-sm" id="skip">${ICON.skip}${mine && !isHost() ? 'Skip my song' : 'Skip'}</button>`);
-    return `<div class="now" style="--tint: hsl(${coverHue(n.song)} 44% 36%)">
-      <div class="now-top">${cover(n.song)}
+    if (!isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
+    actions.push(`<button type="button" class="btn btn-sm" id="open-full" data-key="${n.key}">${ICON.open}Open in ${esc(appName(app))}</button>`);
+    return `<div class="now" style="--tint: hsl(${hueOf(n.song)} 44% 36%)">
+      <div class="now-top">${cover(n.song, true)}
         <div><h3 class="now-title">${esc(n.song.title)}</h3><p class="now-artist">${esc(n.song.artist)}</p></div></div>
-      <div class="now-pick">${avatar(n.by)}<div class="now-pick-text"><b>${esc(pickLabel(n.by))}</b><span>${esc(fromLabel(n))}</span></div></div>
+      <div class="now-pick">${avatar(n.by)}<div class="now-pick-text"><b>${esc(pickLabel(n.by))}</b><span>${esc(sourceLine(n.song))}</span></div></div>
       ${progressHTML()}
-      ${actions.length ? `<div class="now-actions">${actions.join('')}</div>` : ''}
+      <div class="now-actions">${actions.join('')}</div>
     </div>`;
   }
 
@@ -397,47 +442,45 @@
       <div class="progress-times num"><span data-elapsed></span><span data-total></span></div></div>`;
 
   function rowHTML(e) {
-    const n = e.bumps.size, title = esc(e.song.title);
-    const mine = e.by === ME;
+    const n = e.bumps.length, title = esc(e.song.title);
+    const mine = e.by === ui.me;
     let side;
-    if (state.view === 'tv') {
+    if (ui.view === 'tv') {
       side = n ? `<span class="tv-bumps num">${plural(n, 'bump')}</span>` : '<span></span>';
     } else {
-      const bumped = e.bumps.has(ME);
-      // Placeholder rule, pending a product decision: you can remove your own
-      // songs, and the host can remove any.
+      const bumped = e.bumps.includes(ui.me);
       side = `<div class="row-side">
         ${mine || isHost() ? `<button type="button" class="iconbtn" data-remove="${e.key}" aria-label="Remove ${title} from the queue">${ICON.x}</button>` : ''}
         <button type="button" class="bump num" data-bump="${e.key}" aria-pressed="${bumped}"
           aria-label="${bumped ? 'Take back your bump on' : 'Bump'} ${title}. ${plural(n, 'bump')}.">${bumped ? ICON.upSolid : ICON.up}<span>${n}</span></button></div>`;
     }
-    return `<li class="row${state.justAdded === e.key ? ' is-new' : ''}" data-key="${e.key}">${cover(e.song)}
+    return `<li class="row${ui.justAdded === e.song.ref ? ' is-new' : ''}" data-key="${e.key}">${cover(e.song)}
       <div class="row-main"><span class="row-title">${title}</span><span class="row-artist">${esc(e.song.artist)}</span>
-        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : labelOf(e.by))}</b><span>${esc(serviceName(e.service))}</span></span></div>
+        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b><span>${esc(CATALOGS[e.song.src] || '')}</span></span></div>
       ${side}</li>`;
   }
 
   function queueHTML() {
-    const tv = state.view === 'tv';
-    if (!state.queue.length) {
-      if (!state.now) {
-        return tv ? '' : `<div class="empty"><b>The queue is empty</b>Songs line up here as people add them. Friends can use any music app.
+    const tv = ui.view === 'tv', q = ui.room.queue;
+    if (!q.length) {
+      if (!ui.room.now) {
+        return tv ? '' : `<div class="empty"><b>The queue is empty</b>Songs line up here as people add them.
           <button type="button" class="btn" data-open-invite>${ICON.invite}Invite friends</button></div>`;
       }
       return tv
         ? '<div class="empty"><b>Nothing queued after this</b>Scan the code to add the next song.</div>'
         : '<div class="empty"><b>Nothing queued after this</b>Add the next song before the room goes quiet.</div>';
     }
-    let shown = state.queue.length;
-    if (tv) shown = state.queue.length > state.tvRows ? Math.max(1, state.tvRows - 1) : state.queue.length;
-    const more = state.queue.length - shown;
-    return `<ol class="list">${state.queue.slice(0, shown).map(rowHTML).join('')}</ol>${more > 0 ? `<p class="tv-more">and ${plural(more, 'more song')}</p>` : ''}`;
+    let shown = q.length;
+    if (tv) shown = q.length > ui.tvRows ? Math.max(1, ui.tvRows - 1) : q.length;
+    const more = q.length - shown;
+    return `<ol class="list">${q.slice(0, shown).map(rowHTML).join('')}</ol>${more > 0 ? `<p class="tv-more">and ${plural(more, 'more song')}</p>` : ''}`;
   }
 
   function peopleBtnHTML() {
-    const shown = state.people.slice(0, 3);
-    return `<span class="stack">${shown.map((p) => avatar(p.id)).join('')}</span><span aria-hidden="true">${state.people.length}</span>
-      <span class="visually-hidden">${people(state.people.length)} in this room. Open the list.</span>`;
+    const list = ui.room.people;
+    return `<span class="stack">${list.slice(0, 3).map((p) => avatar(p.id)).join('')}</span><span aria-hidden="true">${list.length}</span>
+      <span class="visually-hidden">${people(list.length)} in this room. Open the list.</span>`;
   }
 
   // ---------- rendering ----------
@@ -446,13 +489,10 @@
   const slot = (name) => $(`[data-slot="${name}"]`, app);
 
   function render() {
-    const v = state.view;
-    app.innerHTML = v === 'room' ? roomHTML() : v === 'tv' ? tvHTML() : v === 'setup' ? setupHTML() : landingHTML();
+    const v = ui.view;
+    app.innerHTML = v === 'room' ? roomHTML() : v === 'tv' ? tvHTML() : v === 'setup' ? setupHTML()
+      : v === 'landing' ? landingHTML() : '<main class="loading"><p class="wordmark">syng</p></main>';
     document.body.classList.toggle('is-tv', v === 'tv');
-    document.querySelectorAll('.proto [data-proto]').forEach((b) => {
-      const on = b.dataset.proto === v || (b.dataset.proto === 'landing' && v === 'setup');
-      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    });
     if (v === 'tv') drawQR($('#tv-qr'));
     if (v === 'room' || v === 'tv') refresh(true);
     if (v === 'tv') fitTV();
@@ -461,7 +501,7 @@
 
   // Re-render the parts that change while the room is open. Rows that moved slide.
   function refresh(instant) {
-    if (state.view !== 'room' && state.view !== 'tv') return;
+    if ((ui.view !== 'room' && ui.view !== 'tv') || !ui.room) return;
     const q = slot('queue');
     const before = new Map();
     if (!instant) q.querySelectorAll('[data-key]').forEach((el) => before.set(el.dataset.key, el.getBoundingClientRect().top));
@@ -471,11 +511,12 @@
 
     slot('now').innerHTML = nowHTML();
     q.innerHTML = queueHTML();
-    slot('count').textContent = state.queue.length ? plural(state.queue.length, 'song') : '';
-    if (state.view === 'room') {
-      slot('nowhead').innerHTML = nowHeadHTML();
+    slot('count').textContent = ui.room.queue.length ? plural(ui.room.queue.length, 'song') : '';
+    if (ui.view === 'room') {
+      const n = ui.room.now;
+      slot('nowhead').innerHTML = n ? `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}` : 'Now playing';
       slot('people').innerHTML = peopleBtnHTML();
-      slot('addlabel').textContent = 'Add a song from ' + serviceName(myService());
+      slot('roomname').textContent = isHost() ? 'Your room' : nameOf(ui.room.hostId) + '’s room';
     }
     paintProgress(true);
 
@@ -488,28 +529,39 @@
         if (Math.abs(dy) > 1) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' });
       });
     }
-    state.justAdded = null;
+    ui.justAdded = null;
     if ($('#people-sheet').open) renderPeople();
+    if ($('#search-sheet').open && !ui.search.loading) renderResults();
+    if (ui.view === 'tv') fitTV();
+  }
+
+  /** Where the song is right now, from the server's clock. */
+  function position() {
+    const n = ui.room && ui.room.now;
+    if (!n) return 0;
+    return Math.min(n.duration, n.paused ? n.position : n.position + (Date.now() - ui.receivedAt));
   }
 
   function paintProgress(jump) {
-    const n = state.now, fill = $('[data-fill]', app);
+    const n = ui.room && ui.room.now, fill = $('[data-fill]', app);
     if (!n || !fill) return;
+    const pos = position();
     if (jump) fill.style.transition = 'none';
-    fill.style.transform = 'scaleX(' + Math.min(1, n.elapsed / n.song.secs) + ')';
+    fill.style.transform = 'scaleX(' + Math.min(1, pos / n.duration) + ')';
     if (jump) { void fill.offsetWidth; fill.style.transition = ''; }
-    $('[data-elapsed]', app).textContent = clock(n.elapsed);
-    $('[data-total]', app).textContent = clock(n.song.secs);
+    $('[data-elapsed]', app).textContent = clock(pos);
+    $('[data-total]', app).textContent = clock(n.duration);
   }
+  setInterval(() => paintProgress(false), 500);
 
   // The big screen cannot scroll, so show only as many rows as fit.
   function fitTV() {
-    if (state.view !== 'tv') return;
+    if (ui.view !== 'tv') return;
     const box = $('.tv-queue', app), row = $('.tv-queue .row', app);
     if (!box || !row) return;
     const fixed = matchMedia('(min-width: 900px)').matches;
     const rows = fixed ? Math.max(1, Math.floor(box.clientHeight / row.getBoundingClientRect().height)) : 99;
-    if (rows !== state.tvRows) { state.tvRows = rows; refresh(true); }
+    if (rows !== ui.tvRows) { ui.tvRows = rows; refresh(true); }
   }
   window.addEventListener('resize', fitTV);
 
@@ -520,139 +572,216 @@
   window.addEventListener('scroll', watchRoombar, { passive: true });
 
   function drawQR(box) {
-    if (!box || typeof qrcode !== 'function') return;
+    if (!box || typeof qrcode !== 'function' || !ui.room) return;
     const qr = qrcode(0, 'M');
-    qr.addData(location.href.split('#')[0] + '#join');
+    qr.addData(inviteLink());
     qr.make();
     box.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
   }
 
-  // ---------- search sheet ----------
+  // ---------- sound ----------
+
+  // The host's device is the room's speaker. Anyone else can opt in to hear the
+  // same preview on their own device, kept in step with the server's clock.
+  const player = $('#player');
+  let loadedKey = null;
+
+  function stopPlayer() {
+    player.pause();
+    player.removeAttribute('src');
+    loadedKey = null;
+  }
+
+  function syncPlayer() {
+    const n = ui.room && ui.room.now;
+    if (!n || !isPlayer() || !n.song.preview) {
+      if (loadedKey) stopPlayer();
+      return;
+    }
+    if (loadedKey !== n.key) {
+      loadedKey = n.key;
+      player.src = n.song.preview;
+      player.currentTime = 0;
+    }
+    const want = position() / 1000;
+    if (Number.isFinite(player.duration) && want >= player.duration) return;
+    if (Math.abs(player.currentTime - want) > 1.5) {
+      try { player.currentTime = want; } catch (_) { /* not seekable yet */ }
+    }
+    if (n.paused) { player.pause(); return; }
+    if (player.paused) {
+      const p = player.play();
+      if (p && p.catch) {
+        p.then(() => { if (ui.needsTap) { ui.needsTap = false; refresh(true); } })
+          .catch((e) => {
+            // Browsers block sound until the person taps something.
+            if (e && e.name === 'NotAllowedError' && !ui.needsTap) { ui.needsTap = true; refresh(true); }
+          });
+      }
+    }
+  }
+  setInterval(syncPlayer, 2000);
+
+  player.addEventListener('loadedmetadata', () => {
+    const n = ui.room && ui.room.now;
+    if (isHost() && n && n.key === loadedKey && Number.isFinite(player.duration)) {
+      api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'duration', key: n.key, ms: Math.round(player.duration * 1000) }).catch(() => {});
+    }
+  });
+  player.addEventListener('ended', () => {
+    const n = ui.room && ui.room.now;
+    if (isHost() && n && n.key === loadedKey) {
+      api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'ended', key: n.key }).catch(() => {});
+    }
+  });
+
+  // Keep the host's screen awake where the browser allows it; the room stops if the phone sleeps.
+  let wakeLock = null;
+  async function keepAwake() {
+    try { if (isHost() && 'wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (_) { /* optional */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+  // ---------- search ----------
 
   const searchSheet = $('#search-sheet'), input = $('#search-input'), results = $('#results');
   $('.searchbox-icon').innerHTML = ICON.search;
-  let searchTimer;
-
-  const scopeIds = () => (state.scope === 'mine' ? state.me.services : state.scope === 'all' ? ALL : [state.scope]);
-  const connected = (id) => state.me.services.includes(id);
+  let searchTimer, searchAbort;
 
   function renderChips() {
-    const mine = state.me.services;
-    const chips = [
-      ['mine', mine.length > 1 ? 'My apps' : serviceName(mine[0])],
-      ['all', 'All apps'],
-      ...SERVICES.filter((s) => !(mine.length === 1 && s.id === mine[0])).map((s) => [s.id, s.name]),
-    ];
+    const chips = [['all', 'All'], ['apple', 'Apple Music'], ['deezer', 'Deezer']];
     $('#scope-chips').innerHTML = chips.map(([id, label]) =>
-      `<button type="button" class="chip" data-scope="${id}" aria-pressed="${state.scope === id}">${esc(label)}</button>`).join('');
+      `<button type="button" class="chip" data-scope="${id}" aria-pressed="${ui.scope === id}">${esc(label)}</button>`).join('');
   }
 
-  function runSearch() {
-    state.loading = true;
-    renderResults();
+  function queueSearch(now) {
+    const q = input.value.trim();
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => { state.loading = false; renderResults(); }, 320);
+    if (searchAbort) searchAbort.abort();
+    ui.search = { q, loading: !!q, songs: [], failed: [], error: '' };
+    renderResults();
+    if (q.length < 2) { ui.search.loading = false; return renderResults(); }
+    searchTimer = setTimeout(runSearch, now ? 0 : 450);
   }
 
-  function connectButton(id, label) {
-    return state.connecting === id
-      ? '<button type="button" class="btn btn-sm is-busy" disabled>Connecting</button>'
-      : `<button type="button" class="btn btn-sm" data-connect="${id}">${esc(label)}</button>`;
+  async function runSearch() {
+    const q = ui.search.q, scope = ui.scope;
+    searchAbort = new AbortController();
+    try {
+      const r = await api(`/api/search?q=${encodeURIComponent(q)}&src=${scope}&code=${ui.room.code}&token=${device.token}`, null, { signal: searchAbort.signal });
+      if (q !== input.value.trim() || scope !== ui.scope) return;
+      ui.search = { q, loading: false, songs: r.songs || [], failed: r.failed || [], error: '' };
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      ui.search = { q, loading: false, songs: [], failed: [], error: e.message };
+    }
+    renderResults();
   }
 
   function renderResults() {
-    const note = $('#search-note');
-    const ids = scopeIds();
-    const single = state.scope !== 'mine' && state.scope !== 'all' ? state.scope : null;
-    const scopeLabel = state.scope === 'all' ? 'all apps' : state.scope === 'mine' && ids.length > 1 ? 'your apps' : serviceName(ids[0]);
+    const s = ui.search, note = $('#search-note');
+    const scopeLabel = ui.scope === 'all' ? 'Apple Music and Deezer' : CATALOGS[ui.scope];
     input.placeholder = 'Search ' + scopeLabel;
+    note.textContent = s.failed.length && !s.loading
+      ? `${s.failed.map((f) => CATALOGS[f] || f).join(' and ')} didn’t respond. Showing the rest.` : '';
 
-    // Browsing an app you have not connected: say so, and say where songs would play from.
-    if (single && !connected(single)) {
-      note.innerHTML = `<span>You haven’t connected ${esc(serviceName(single))}. Songs you add here play from your ${esc(serviceName(myService()))} when it has them.</span>
-        ${connectButton(single, 'Connect ' + serviceName(single))}`;
-    } else {
-      note.textContent = input.value.trim() ? '' : 'Suggested on ' + scopeLabel;
-    }
-
-    if (state.loading) {
-      results.innerHTML = Array.from({ length: 5 }, () => '<li class="skel" aria-hidden="true"><i></i><div><i></i><i></i></div></li>').join('');
+    if (s.loading) {
+      results.innerHTML = Array.from({ length: 6 }, () => '<li class="skel" aria-hidden="true"><i></i><div><i></i><i></i></div></li>').join('');
       return;
     }
-    const q = input.value.trim().toLowerCase();
-    const hits = CATALOG.filter((s) => s.on.some((id) => ids.includes(id))
-      && (q ? (s.title + ' ' + s.artist).toLowerCase().includes(q) : !inRoom(s.id)));
-    if (!hits.length) {
-      const wider = state.scope !== 'all';
-      results.innerHTML = `<li class="results-note"><b>No results for “${esc(input.value.trim())}” on ${esc(scopeLabel)}</b>
-        ${wider ? 'It may be on another app.' : 'Check the spelling, or try the artist’s name.'}
-        ${wider ? '<br><button type="button" class="btn btn-sm" data-scope="all">Search all apps</button>' : ''}</li>`;
+    if (s.error) {
+      results.innerHTML = `<li class="results-note"><b>Search didn’t work</b>${esc(s.error)}
+        <br><button type="button" class="btn btn-sm" id="search-retry">Try again</button></li>`;
       return;
     }
-    results.innerHTML = hits.map((s) => {
-      const via = s.on.find(connected);
-      const only = s.on.length === ALL.length ? '' : 'Only on ' + s.on.map(serviceName).join(', ');
-      let where = only;
-      if (via && single && via !== single) where = 'Plays from your ' + serviceName(via);
-      if (!via) where = only + '. Connect it to add this song.';
+    if (s.q.length < 2) {
+      results.innerHTML = `<li class="results-note"><b>Find a song</b>Search by song or artist. Results come from ${esc(scopeLabel)}.
+        The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.</li>`;
+      return;
+    }
+    if (!s.songs.length) {
+      results.innerHTML = `<li class="results-note"><b>No results for “${esc(s.q)}”</b>Check the spelling, or try the artist’s name.
+        ${ui.scope !== 'all' ? '<br><button type="button" class="btn btn-sm" data-scope="all">Search both catalogs</button>' : ''}</li>`;
+      return;
+    }
+    // The two catalogs often both have a song. Show it once, and treat either
+    // copy as "in the queue" when the room already has that song.
+    const same = (song) => (song.title + '|' + song.artist).toLowerCase();
+    const inRoom = new Set(ui.room.queue.map((e) => same(e.song)));
+    if (ui.room.now) inRoom.add(same(ui.room.now.song));
+    const seen = new Set();
+    const songs = s.songs.filter((song) => !seen.has(same(song)) && seen.add(same(song)));
+    results.innerHTML = songs.map((song) => {
       let action;
-      if (inRoom(s.id)) action = `<span class="added">${ICON.check}In queue</span>`;
-      else if (via) action = `<button type="button" class="btn btn-primary btn-sm" data-add="${s.id}" data-via="${via}" aria-label="Add ${esc(s.title)}">Add</button>`;
-      else action = connectButton(s.on[0], 'Connect');
-      return `<li class="row">${cover(s)}
-        <div class="row-main"><span class="row-title">${esc(s.title)}</span><span class="row-artist">${esc(s.artist)}</span>
+      if (inRoom.has(same(song))) action = `<span class="added">${ICON.check}In queue</span>`;
+      else if (ui.adding.has(song.ref)) action = '<button type="button" class="btn btn-sm is-busy" disabled>Adding</button>';
+      else action = `<button type="button" class="btn btn-primary btn-sm" data-add="${esc(song.ref)}" aria-label="Add ${esc(song.title)} by ${esc(song.artist)}">Add</button>`;
+      const where = [song.album, ui.scope === 'all' ? CATALOGS[song.src] : ''].filter(Boolean).join(', ');
+      return `<li class="row">${cover(song)}
+        <div class="row-main"><span class="row-title">${esc(song.title)}</span><span class="row-artist">${esc(song.artist)}</span>
           ${where ? `<span class="result-where">${esc(where)}</span>` : ''}</div>
         ${action}</li>`;
     }).join('');
   }
 
   function openSearch() {
-    state.scope = 'mine';
+    const mine = myApp();
+    ui.scope = CATALOGS[mine] ? mine : 'all';
     input.value = '';
+    ui.search = { q: '', loading: false, songs: [], failed: [], error: '' };
     renderChips();
-    state.loading = false;
     renderResults();
     searchSheet.showModal();
     input.focus();
   }
 
-  // ---------- room sheet (people + invite) and app picker ----------
+  async function addSong(ref) {
+    ui.adding.add(ref);
+    renderResults();
+    try {
+      const wasEmpty = !ui.room.now;
+      await api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'add', ref });
+      ui.justAdded = ref;
+      toast(wasEmpty ? 'Playing now' : 'Added to the queue');
+    } catch (e) {
+      toast(e.message);
+    }
+    ui.adding.delete(ref);
+    renderResults();
+  }
+
+  // ---------- room sheet (invite + people) and app picker ----------
 
   function renderPeople() {
+    const link = inviteLink();
     $('#people-body').innerHTML = `
       <section class="sheet-section" aria-labelledby="inv-h"><h3 id="inv-h">Invite</h3>
+        ${offWifi() ? '<p class="notice">This phone isn’t on Wi-Fi, so friends can’t reach the room yet. Connect to Wi-Fi or turn on your hotspot.</p>' : ''}
         <div class="invite"><div class="qr" id="invite-qr" role="img" aria-label="QR code to join this room"></div>
-          <div><p>Room code</p><p class="invite-code">${esc(state.room.code)}</p>
+          <div><p>Room code</p><p class="invite-code">${esc(ui.room.code)}</p>
             <button type="button" class="btn btn-sm" id="copy-link">${ICON.copy}Copy invite link</button></div></div>
+        <p class="invite-help">${ui.info.lan ? 'Friends on the same Wi-Fi scan the code or open' : 'Friends scan the code or open'} <span class="invite-link">${esc(link)}</span></p>
       </section>
-      <section class="sheet-section" aria-labelledby="ppl-h"><h3 id="ppl-h">${people(state.people.length)} here</h3>
-        <ul>${state.people.map((p) => `<li class="person">${avatar(p.id, 'avatar-lg')}
-          <div><span class="person-name">${esc(p.id === ME ? p.label + ' (you)' : p.label)}${p.host ? '<span class="tag">Host</span>' : ''}</span>
-            <span class="person-app">${esc(p.id === ME ? state.me.services.map(serviceName).join(', ') : serviceName(p.service))}</span></div>
-          ${p.id === ME ? '<button type="button" class="btn btn-sm" id="change-app">Change app</button>' : '<span></span>'}</li>`).join('')}</ul>
+      <section class="sheet-section" aria-labelledby="ppl-h"><h3 id="ppl-h">${people(ui.room.people.length)} here</h3>
+        <ul>${ui.room.people.map((p) => `<li class="person">${avatar(p.id, 'avatar-lg')}
+          <div><span class="person-name">${esc(p.id === ui.me ? p.name + ' (you)' : p.name)}${p.host ? '<span class="tag">Host</span>' : ''}${p.online ? '' : '<span class="tag">Away</span>'}</span>
+            <span class="person-app">${esc(appName(p.app))}</span></div>
+          ${p.id === ui.me ? '<button type="button" class="btn btn-sm" id="change-app">Change app</button>' : '<span></span>'}</li>`).join('')}</ul>
       </section>
       <div class="sheet-actions">
         <button type="button" class="btn btn-block" id="open-tv">${ICON.tv}Show on a big screen</button>
-        <button type="button" class="btn btn-ghost btn-block btn-danger-text" id="leave-room">Leave room</button>
+        <button type="button" class="btn btn-ghost btn-block btn-danger-text" id="leave-room">${isHost() && ui.room.people.length > 1 ? 'Leave and hand over the room' : 'Leave room'}</button>
       </div>`;
     drawQR($('#invite-qr'));
   }
   function openPeople() { renderPeople(); $('#people-sheet').showModal(); }
 
-  function openServicePicker() {
-    $('#service-body').innerHTML = `<p class="setup-sub">Search uses this app first. Songs you add play from your account there.</p>
-      <form id="service-form">${serviceOptions('service-pick', myService())}
+  function openAppPicker() {
+    $('#service-body').innerHTML = `<p class="setup-sub">Full songs open in this app.</p>
+      <form id="service-form">${appOptions('app-pick', myApp())}
       <button type="submit" class="btn btn-primary btn-block">Use this app</button></form>`;
     $('#service-sheet').showModal();
   }
-
-  function setPrimaryService(id) {
-    state.me.services = [id, ...state.me.services.filter((s) => s !== id)];
-    savePrefs();
-    const p = person(ME);
-    if (p) p.service = id;
-  }
-  const savePrefs = () => prefs.write({ name: state.me.name, services: state.me.services });
 
   // Sheets close on a tap outside, and on a downward swipe from the header.
   document.querySelectorAll('dialog').forEach((dlg) => {
@@ -680,28 +809,54 @@
 
   function go(view) {
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
-    state.view = view;
-    const hash = { room: '#room', tv: '#tv' }[view] || '';
-    try { history.replaceState(null, '', hash || location.pathname + location.search); } catch (_) { /* sandboxed */ }
+    ui.view = view;
     render();
     window.scrollTo(0, 0);
   }
 
-  function ensureDemoIdentity() {
-    if (!state.me.name) state.me.name = 'Alex';
-    if (!state.me.services.length) state.me.services = ['spotify'];
+  /** Back to the start screen. If this page belongs to someone else's phone, return to our own. */
+  function goHome() {
+    try { history.replaceState(null, '', location.pathname); } catch (_) { /* sandboxed */ }
+    if (device.home && device.home !== location.origin + '/') {
+      const home = device.home;
+      device.home = ''; persist();
+      location.href = home + (ui.notice ? '#notice=' + encodeURIComponent(ui.notice) : '');
+      return;
+    }
+    go('landing');
   }
 
-  function leaveRoom() { script++; state.room = null; go('landing'); }
+  async function leaveRoom() {
+    const code = ui.room && ui.room.code;
+    disconnect();
+    stopPlayer();
+    if (code) { try { await api(`/api/rooms/${code}/act`, { token: device.token, type: 'leave' }); } catch (_) { /* gone already */ } }
+    ui.room = null; ui.me = null; ui.listening = false;
+    device.room = ''; persist();
+    ui.notice = '';
+    goHome();
+  }
 
-  // The Android app calls this for the system back button. Returns "1" when
-  // the press was used here, so the app only closes from the landing page.
+  async function enterRoom(mode, code) {
+    const body = { token: device.token, name: device.name, app: device.app };
+    const r = await api(mode === 'start' ? '/api/rooms' : `/api/rooms/${code}/join`, body);
+    device.room = r.code; persist();
+    ui.me = r.me; ui.room = r.state; ui.receivedAt = Date.now(); ui.notice = '';
+    ui.view = 'room';
+    render();
+    connect(r.code);
+    keepAwake();
+    return r;
+  }
+
+  // The Android app calls this for the system back button. "1" means the press
+  // was used here; "0" lets the app go to the background.
   window.syngBack = () => {
     const open = document.querySelector('dialog[open]');
     if (open) { open.close(); return '1'; }
-    if (state.view === 'tv') { go('room'); return '1'; }
-    if (state.view === 'setup') { go('landing'); return '1'; }
-    if (state.view === 'room') { leaveRoom(); return '1'; }
+    if (ui.view === 'tv') { go('room'); return '1'; }
+    if (ui.view === 'setup') { go('landing'); return '1'; }
+    if (ui.view === 'room') { openPeople(); return '1'; }
     return '0';
   };
 
@@ -712,126 +867,165 @@
     if (!t) return;
     const d = t.dataset;
 
-    if (d.proto) {
-      if (d.proto === 'landing') return leaveRoom();
-      ensureDemoIdentity();
-      if (!state.room) loadFriendsRoom();
-      return go(d.proto);
-    }
     if ('close' in d) return t.closest('dialog').close();
-    if (t.id === 'start-room') { state.setup = { mode: 'start', code: '', busy: false }; return go('setup'); }
+    if (t.id === 'start-room') { ui.setup = { mode: 'start', code: '', busy: false }; return go('setup'); }
     if (t.id === 'setup-back') return go('landing');
 
-    if (d.bump) return toggleBump(d.bump);
-    if (d.remove) return removeSong(d.remove);
+    if (d.bump) return act('bump', { key: d.bump }).catch(() => {});
+    if (d.remove) {
+      const e = ui.room.queue.find((q) => q.key === d.remove);
+      return act('remove', { key: d.remove }).then(() => {
+        if (e) toast('Removed ' + e.song.title, 'Undo', () => addSong(e.song.ref));
+      }).catch(() => {});
+    }
     if (t.id === 'open-search') return openSearch();
     if (t.id === 'open-people' || t.id === 'open-invite' || 'openInvite' in d) return openPeople();
-    if (t.id === 'skip') return skip();
-    if (t.id === 'toggle-play') { state.playing = !state.playing; return refresh(true); }
+    if (t.id === 'skip') return act('skip', { key: ui.room.now.key }).catch(() => {});
+    if (t.id === 'toggle-play') return act(ui.room.now.paused ? 'play' : 'pause').catch(() => {});
+    if (t.id === 'toggle-listen') {
+      ui.listening = !ui.listening; ui.needsTap = false;
+      syncPlayer(); refresh(true);
+      return toast(ui.listening ? 'Sound is on for this device' : 'Sound is off for this device');
+    }
+    if (t.id === 'tap-sound') { ui.needsTap = false; player.play().catch(() => {}); syncPlayer(); return refresh(true); }
+    if (t.id === 'open-full') {
+      const n = ui.room.now;
+      return n && openOutside(fullSongUrl(n.song, myApp()));
+    }
 
-    if (d.scope) { state.scope = d.scope; renderChips(); return runSearch(); }
-    if (d.add != null && d.add !== '') {
-      const e = addSong(Number(d.add), ME, d.via);
-      renderResults();
-      const from = 'your ' + serviceName(e.service);
-      return toast(state.now && state.now.key === e.key ? 'Playing now from ' + from : 'Added. Plays from ' + from + '.');
-    }
-    if (d.connect) {
-      state.connecting = d.connect; renderResults();
-      return setTimeout(() => {
-        if (!connected(d.connect)) state.me.services.push(d.connect);
-        state.connecting = null; savePrefs(); renderChips(); renderResults();
-        toast(serviceName(d.connect) + ' connected');
-      }, 700);
-    }
+    if (d.scope) { ui.scope = d.scope; renderChips(); return queueSearch(true); }
+    if (t.id === 'search-retry') return queueSearch(true);
+    if (d.add) return addSong(d.add);
 
     if (t.id === 'copy-link') {
-      const link = location.href.split('#')[0] + '#join';
+      const link = inviteLink();
       const done = () => toast('Invite link copied');
-      const fail = () => toast('Copy this link: ' + link);
+      const fail = () => toast('Couldn’t copy. The link is shown under the code.');
       try { navigator.clipboard.writeText(link).then(done, fail); } catch (_) { fail(); }
       return;
     }
-    if (t.id === 'change-app') return openServicePicker();
+    if (t.id === 'change-app') return openAppPicker();
     if (t.id === 'open-tv') return go('tv');
     if (t.id === 'tv-exit') return go('room');
     if (t.id === 'leave-room') return leaveRoom();
   });
 
-  input.addEventListener('input', runSearch);
+  input.addEventListener('input', () => queueSearch(false));
 
-  document.addEventListener('submit', (ev) => {
+  // Mark the chosen option with a class as well, for browsers without the CSS :has() selector.
+  document.addEventListener('change', (ev) => {
+    if (ev.target.type !== 'radio') return;
+    const list = ev.target.closest('.options');
+    if (list) list.querySelectorAll('.option').forEach((o) => o.classList.toggle('is-checked', o.contains(ev.target)));
+  });
+
+  document.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const id = ev.target.id;
 
+    if (id === 'search-form') return queueSearch(true);
+
     if (id === 'join-form') {
-      const field = $('#join-code'), err = $('#join-error');
-      const code = field.value.trim().toUpperCase();
-      if (!/^[A-Z0-9]{4}$/.test(code)) {
-        err.textContent = 'Room codes are 4 letters or numbers. Check the screen or the invite.';
-        err.hidden = false; field.setAttribute('aria-invalid', 'true'); field.focus();
+      const field = $('#join-code'), err = $('#join-error'), btn = $('#join-submit');
+      const fail = (msg) => { err.textContent = msg; err.hidden = false; field.setAttribute('aria-invalid', 'true'); field.focus(); };
+      const raw = field.value.trim();
+      err.hidden = true; field.removeAttribute('aria-invalid');
+      if (/^https?:\/\//i.test(raw)) {
+        // An invite link: go to that room's own address.
+        let url;
+        try { url = new URL(raw); } catch (_) { return fail('That link doesn’t look right. Paste the whole invite link.'); }
+        const m = /join=([A-Za-z0-9]{4})/.exec(url.hash);
+        if (!m) return fail('That link doesn’t include a room. Ask for the invite link again.');
+        if (url.origin === location.origin) { ui.setup = { mode: 'join', code: m[1].toUpperCase(), busy: false }; return go('setup'); }
+        location.href = `${url.origin}/#join=${m[1].toUpperCase()}&home=${encodeURIComponent(location.origin + '/')}&name=${encodeURIComponent(device.name)}&app=${device.app}`;
         return;
       }
-      state.setup = { mode: 'join', code, busy: false };
-      return go('setup');
+      const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code.length !== 4) return fail('Room codes are 4 letters or numbers. Check the host’s screen or the invite.');
+      btn.disabled = true; btn.textContent = 'Looking';
+      const base = await findRoom(code);
+      btn.disabled = false; btn.textContent = 'Join';
+      if (base === null) {
+        return fail(ui.info.lan
+          ? 'No room with that code on this Wi-Fi. Check the code, and that you’re on the same network as the host.'
+          : 'No room with that code. Check it with the host.');
+      }
+      if (base === '') { ui.setup = { mode: 'join', code, busy: false }; return go('setup'); }
+      location.href = `${base}/#join=${code}&home=${encodeURIComponent(location.origin + '/')}&name=${encodeURIComponent(device.name)}&app=${device.app}`;
+      return;
     }
 
     if (id === 'setup-form') {
-      if (state.setup.busy) return;
-      const nameField = $('#setup-name'), nameErr = $('#setup-name-error'), svcErr = $('#setup-service-error');
+      if (ui.setup.busy) return;
+      const nameField = $('#setup-name'), nameErr = $('#setup-name-error'), appErr = $('#setup-app-error'), formErr = $('#setup-error');
       const name = nameField.value.trim();
-      const picked = ev.target.querySelector('input[name="service"]:checked');
-      nameErr.hidden = svcErr.hidden = true; nameField.removeAttribute('aria-invalid');
+      const picked = ev.target.querySelector('input[name="app"]:checked');
+      nameErr.hidden = appErr.hidden = formErr.hidden = true; nameField.removeAttribute('aria-invalid');
       if (!name) {
         nameErr.textContent = 'Enter a name so friends know whose pick it is.';
         nameErr.hidden = false; nameField.setAttribute('aria-invalid', 'true'); nameField.focus();
         return;
       }
       if (!picked) {
-        svcErr.textContent = 'Choose the app you listen with.';
-        svcErr.hidden = false; ev.target.querySelector('input[name="service"]').focus();
+        appErr.textContent = 'Choose the app you listen with.';
+        appErr.hidden = false; ev.target.querySelector('input[name="app"]').focus();
         return;
       }
-      state.me.name = name;
-      state.me.services = [picked.value];
-      savePrefs();
-      // Stand-in for the real sign-in hand-off to the chosen app.
-      state.setup.busy = true;
-      const btn = $('#setup-submit');
-      btn.disabled = true; btn.classList.add('is-busy');
-      btn.textContent = 'Connecting ' + serviceName(picked.value);
-      const mode = state.setup.mode, code = state.setup.code;
-      setTimeout(() => {
-        if (state.view !== 'setup') return;
-        if (mode === 'join') loadFriendsRoom(code); else loadOwnRoom();
-        go('room');
+      device.name = name; device.app = picked.value; persist();
+      const btn = $('#setup-submit'), label = btn.textContent, mode = ui.setup.mode;
+      ui.setup.busy = true; btn.disabled = true; btn.classList.add('is-busy');
+      btn.textContent = mode === 'start' ? 'Starting' : 'Joining';
+      try {
+        await enterRoom(mode, ui.setup.code);
         if (mode === 'start') openPeople();
-        toast(serviceName(picked.value) + ' connected');
-      }, 900);
+      } catch (e) {
+        ui.setup.busy = false;
+        const b = $('#setup-submit');
+        if (b) { b.disabled = false; b.classList.remove('is-busy'); b.textContent = label; }
+        const fe = $('#setup-error');
+        if (fe) { fe.textContent = e.message; fe.hidden = false; }
+      }
       return;
     }
 
     if (id === 'service-form') {
       const picked = ev.target.querySelector('input:checked');
-      if (picked) setPrimaryService(picked.value);
       $('#service-sheet').close();
-      refresh(true);
-      if (picked) toast('Now searching ' + serviceName(picked.value));
+      if (!picked) return;
+      device.app = picked.value; persist();
+      act('app', { app: picked.value }).then(() => toast('Full songs now open in ' + appName(picked.value))).catch(() => {});
     }
   });
 
-  // ---------- simulated playback ----------
-
-  setInterval(() => {
-    if (!state.playing || !state.now) return;
-    state.now.elapsed += 1;
-    if (state.now.elapsed >= state.now.song.secs) skip(); else paintProgress();
-  }, 1000);
-
   // ---------- start ----------
 
-  const start = location.hash.replace('#', '');
-  if (start === 'room' || start === 'tv') { ensureDemoIdentity(); loadFriendsRoom(); state.view = start; }
-  else if (start === 'join') { state.setup = { mode: 'join', code: 'KQ7M', busy: false }; state.view = 'setup'; }
+  async function boot() {
+    const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+    if (hash.get('home')) device.home = hash.get('home');
+    if (hash.get('name') && !device.name) device.name = hash.get('name').slice(0, 16);
+    if (hash.get('app') && !device.app && APPS.some((a) => a.id === hash.get('app'))) device.app = hash.get('app');
+    if (hash.get('notice')) ui.notice = hash.get('notice').slice(0, 160);
+    persist();
+
+    try { ui.info = await api('/api/info'); } catch (_) { /* keep defaults; actions will report errors */ }
+
+    const joinCode = (hash.get('join') || '').toUpperCase();
+    const wanted = joinCode || device.room;
+    try { history.replaceState(null, '', location.pathname); } catch (_) { /* sandboxed */ }
+
+    if (wanted && device.name && device.app && (!joinCode || device.room === joinCode)) {
+      // Coming back after a reload: step straight into the room.
+      try { await enterRoom('join', wanted); return; } catch (e) {
+        device.room = ''; persist();
+        if (!joinCode) ui.notice = e.status === 404 ? 'That room has ended.' : '';
+      }
+    }
+    if (joinCode) {
+      if (await probe('', joinCode)) { ui.setup = { mode: 'join', code: joinCode, busy: false }; return go('setup'); }
+      ui.notice = 'That room has ended or the link is out of date.';
+    }
+    go('landing');
+  }
   render();
+  boot();
 })();
