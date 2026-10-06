@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-06T21:14:09.579036+00:00",
+  "title": "Design System: syng",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Queue Yellow",
+        "canonical": "#FFD23F",
+        "tonalRamp": [
+          "#2B2200",
+          "#4D3D00",
+          "#7A6200",
+          "#A88700",
+          "#D6AC0F",
+          "#FFD23F",
+          "#FFE07A",
+          "#FFF1C2"
+        ]
+      },
+      "bg": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "#101011",
+        "tonalRamp": [
+          "#101011",
+          "#1A1A1C",
+          "#262628",
+          "#333336",
+          "#55555C",
+          "#8F8F96",
+          "#B3B3B8",
+          "#F4F4F5"
+        ]
+      },
+      "layer-1": {
+        "role": "neutral",
+        "displayName": "Layer 1",
+        "canonical": "#1A1A1C"
+      },
+      "layer-2": {
+        "role": "neutral",
+        "displayName": "Layer 2",
+        "canonical": "#262628"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "#F4F4F5"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Landing headline only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Now-playing title and setup titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and sheet headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Rows, buttons, fields."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Artist, picker, service, times."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 12px 34px rgba(0,0,0,.5)",
+        "purpose": "Sheets and the toast only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(.2,.8,.2,1)",
+        "purpose": "All state transitions, 150 to 280ms."
+      },
+      {
+        "name": "reorder",
+        "value": "240ms",
+        "purpose": "Queue rows slide to their new place after a bump."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sheet",
+        "value": "640px"
+      },
+      {
+        "name": "wide",
+        "value": "900px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action in a view.",
+      "html": "<button class=\"ds-btn-primary\">Start a room</button>",
+      "css": ".ds-btn-primary{min-height:48px;padding:0 22px;border:0;border-radius:999px;background:#FFD23F;color:#1A1606;font:700 .9375rem Figtree,system-ui,sans-serif;transition:background-color .15s}.ds-btn-primary:hover{background:#F2C22B}.ds-btn-primary:focus-visible{outline:2px solid #F4F4F5;outline-offset:2px}"
+    },
+    {
+      "name": "Default button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Secondary actions.",
+      "html": "<button class=\"ds-btn\">Invite</button>",
+      "css": ".ds-btn{min-height:48px;padding:0 22px;border:0;border-radius:999px;background:#262628;color:#F4F4F5;font:700 .9375rem Figtree,system-ui,sans-serif;transition:background-color .15s}.ds-btn:hover{background:#333336}.ds-btn:focus-visible{outline:2px solid #F4F4F5;outline-offset:2px}"
+    },
+    {
+      "name": "Scope chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Chooses which app to search.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"true\">Spotify</button> <button class=\"ds-chip\">All apps</button>",
+      "css": ".ds-chip{min-height:36px;padding:0 14px;border:0;border-radius:999px;background:#1A1A1C;color:#F4F4F5;font:700 .8125rem Figtree,system-ui,sans-serif}.ds-chip:hover{background:#262628}.ds-chip[aria-pressed=true]{background:#F4F4F5;color:#101011}"
+    },
+    {
+      "name": "Bump",
+      "kind": "custom",
+      "refersTo": "bump",
+      "description": "Moves a song up the queue. Pressed state changes fill and icon.",
+      "html": "<button class=\"ds-bump\" aria-pressed=\"true\"><svg viewBox=\"0 0 20 20\" width=\"16\" height=\"16\"><path d=\"M10 5.5 16 13H4z\" fill=\"currentColor\"/></svg>3</button>",
+      "css": ".ds-bump{display:inline-flex;align-items:center;gap:4px;min-width:58px;height:44px;padding:0 12px;border:0;border-radius:999px;background:#1A1A1C;color:#F4F4F5;font:800 .8125rem Figtree,system-ui,sans-serif}.ds-bump[aria-pressed=true]{background:#FFD23F;color:#1A1606}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Name and room code.",
+      "html": "<input class=\"ds-field\" placeholder=\"Shown next to the songs you add\">",
+      "css": ".ds-field{width:100%;min-height:52px;padding:0 16px;border:1px solid #333336;border-radius:12px;background:#1A1A1C;color:#F4F4F5;font:400 1rem Figtree,system-ui,sans-serif}.ds-field:focus-visible{outline:none;border-color:#F4F4F5;box-shadow:0 0 0 1px #F4F4F5}"
+    },
+    {
+      "name": "Queue row",
+      "kind": "custom",
+      "refersTo": "now-card",
+      "description": "A song in the queue with its picker and source app.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-cover\"></span><span><b>Hey Ya!</b><i>OutKast</i><small><em>D</em><strong>Dev</strong> YouTube Music</small></span></div>",
+      "css": ".ds-row{display:grid;grid-template-columns:52px 1fr;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #333336;font-family:Figtree,system-ui,sans-serif;color:#F4F4F5}.ds-cover{width:52px;height:52px;border-radius:6px;background:hsl(112 44% 36%)}.ds-row b{display:block;font-weight:700}.ds-row i{display:block;font-style:normal;font-size:.8125rem;color:#B3B3B8}.ds-row small{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:.75rem;color:#B3B3B8}.ds-row em{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:999px;background:#6CC4F5;color:#17171C;font:800 .625rem Figtree,sans-serif}.ds-row strong{color:#F4F4F5}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Familiar Player",
+    "overview": "syng looks and behaves like the streaming apps people already use, on purpose, so nobody has to learn anything. It sits next to Spotify, Apple Music and YouTube Music without borrowing any one of them, because the queue belongs to no single service.",
+    "keyCharacteristics": [
+      "Every song shows whose pick it is and which account it plays from.",
+      "One yellow accent, used only as a fill under dark text.",
+      "Flat neutral layers; depth from tone, not shadow.",
+      "Services named in text, never with logos or brand colors."
+    ],
+    "rules": [
+      {
+        "name": "The Fill Rule",
+        "body": "Yellow is never text, a border or an outline. It is a fill with dark text on it.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Service Color Rule",
+        "body": "Nothing uses a streaming service's brand color or mark.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tint Rule",
+        "body": "The now-playing card mixes 18% of the cover hue into Layer 1; text inside uses Text and Text 2 only.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Scale Rule",
+        "body": "Type sizes are fixed rem steps; only the big screen scales with the viewport.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Rule",
+        "body": "Cards, rows and buttons never have shadows.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do show the picker and the source account on every song.",
+      "Do name the visitor's own app in the add action.",
+      "Do keep one yellow primary action per view.",
+      "Do pair every color-coded state with a shape or text change."
+    ],
+    "donts": [
+      "Don't use streaming service logos or brand colors.",
+      "Don't use yellow for text, borders or decoration.",
+      "Don't add shadows to cards, rows or buttons.",
+      "Don't add explanatory banners to the room.",
+      "Don't claim integrations or availability that do not exist."
+    ]
+  }
+}

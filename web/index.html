@@ -6,31 +6,53 @@
 <title>syng</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wdth,wght@50..150,100..900&family=Schibsted+Grotesk:wght@400..900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <!-- app:start -->
 <nav class="proto" aria-label="Prototype view">
-  <span class="proto-label">Prototype view</span>
+  <span class="proto-label">Prototype</span>
   <div class="proto-tabs">
-    <button type="button" data-go="landing">Landing</button>
-    <button type="button" data-go="host">Host screen</button>
-    <button type="button" data-go="guest">Guest phone</button>
+    <button type="button" data-proto="landing">Landing</button>
+    <button type="button" data-proto="room">Room</button>
+    <button type="button" data-proto="tv">Big screen</button>
   </div>
+  <span class="proto-note">Sign-in and sound are simulated. Skip, pause and remove rules are placeholders.</span>
 </nav>
 
 <div id="app"></div>
 
-<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+<dialog id="search-sheet" class="sheet sheet-tall" aria-labelledby="search-title">
   <form class="sheet-head" id="search-form" role="search">
-    <h2 id="sheet-title">Add a song</h2>
-    <button type="button" class="btn btn-quiet" id="sheet-close">Close</button>
-    <label class="visually-hidden" for="search-input">Search by song or artist</label>
-    <input id="search-input" type="search" inputmode="search" autocomplete="off"
-           placeholder="Search by song or artist">
+    <h2 id="search-title">Add a song</h2>
+    <button type="button" class="btn btn-ghost" data-close>Done</button>
+    <div class="searchbox">
+      <span class="searchbox-icon" data-icon="search"></span>
+      <label class="visually-hidden" for="search-input">Search songs or artists</label>
+      <input id="search-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off"
+             spellcheck="false" placeholder="Songs or artists">
+    </div>
+    <div class="chips" id="scope-chips" role="group" aria-label="Where to search"></div>
   </form>
-  <ul class="results" id="results"></ul>
+  <p class="sheet-note" id="search-note"></p>
+  <ul class="list results" id="results" aria-live="polite"></ul>
+</dialog>
+
+<dialog id="people-sheet" class="sheet" aria-labelledby="people-title">
+  <div class="sheet-head sheet-head-plain">
+    <h2 id="people-title">Room</h2>
+    <button type="button" class="btn btn-ghost" data-close>Done</button>
+  </div>
+  <div class="sheet-body" id="people-body"></div>
+</dialog>
+
+<dialog id="service-sheet" class="sheet" aria-labelledby="service-title">
+  <div class="sheet-head sheet-head-plain">
+    <h2 id="service-title">Your music app</h2>
+    <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+  </div>
+  <div class="sheet-body" id="service-body"></div>
 </dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
