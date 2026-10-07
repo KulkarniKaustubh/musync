@@ -57,9 +57,9 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private LinearLayout playerPanel;
     private FrameLayout playerStack;
-    private TextView playerBack;
+    private PanelBar playerBar, browseBar;
+    private WebPlayer playerOnScreen;
     private LinearLayout browsePanel;
-    private TextView browseBack;
     private LibraryBrowser browser;
     private boolean browseShown;
     private boolean playerShown;
@@ -251,79 +251,189 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The music services' web players sit in a panel behind musync's own screen.
-     * They keep playing there; bringing the panel to the front is only for signing in
-     * or looking at what a player is doing.
+     * The bar above a service's website when it is on screen: a way back within the
+     * site, what this screen is for, a Done button, and a thin line while a page loads.
+     */
+    private final class PanelBar {
+        final LinearLayout view;
+        final TextView back, title, sub, done;
+        final View progress;
+        private String hint = "";
+        private final Runnable restore = new Runnable() {
+            public void run() { sub.setText(hint); sub.setTextColor(Color.parseColor("#B3B3B8")); }
+        };
+
+        PanelBar() {
+            float dp = getResources().getDisplayMetrics().density;
+            view = new LinearLayout(MainActivity.this);
+            view.setOrientation(LinearLayout.VERTICAL);
+            view.setBackgroundColor(Color.parseColor("#1A1A1C"));
+            LinearLayout row = new LinearLayout(MainActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding((int) (4 * dp), 0, (int) (12 * dp), 0);
+
+            back = new TextView(MainActivity.this);
+            back.setText("\u2039");
+            back.setTextSize(30);
+            back.setTextColor(Color.parseColor("#F4F4F5"));
+            back.setGravity(Gravity.CENTER);
+            back.setContentDescription("Back");
+            row.addView(back, new LinearLayout.LayoutParams((int) (48 * dp), (int) (48 * dp)));
+
+            LinearLayout words = new LinearLayout(MainActivity.this);
+            words.setOrientation(LinearLayout.VERTICAL);
+            title = new TextView(MainActivity.this);
+            title.setTextSize(16);
+            title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+            title.setTextColor(Color.parseColor("#F4F4F5"));
+            title.setSingleLine(true);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            sub = new TextView(MainActivity.this);
+            sub.setTextSize(13);
+            sub.setTextColor(Color.parseColor("#B3B3B8"));
+            sub.setSingleLine(true);
+            sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            words.addView(title);
+            words.addView(sub);
+            LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            wide.setMargins((int) (4 * dp), 0, (int) (12 * dp), 0);
+            row.addView(words, wide);
+
+            done = new TextView(MainActivity.this);
+            done.setText("Done");
+            done.setTextSize(14);
+            done.setTypeface(done.getTypeface(), android.graphics.Typeface.BOLD);
+            done.setTextColor(Color.parseColor("#1A1606"));
+            done.setGravity(Gravity.CENTER);
+            done.setPadding((int) (18 * dp), 0, (int) (18 * dp), 0);
+            android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
+            pill.setColor(Color.parseColor("#FFD23F"));
+            pill.setCornerRadius(999 * dp);
+            done.setBackground(pill);
+            row.addView(done, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (40 * dp)));
+            view.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (60 * dp)));
+
+            progress = new View(MainActivity.this);
+            progress.setBackgroundColor(Color.parseColor("#FFD23F"));
+            progress.setPivotX(0);
+            progress.setScaleX(0);
+            view.addView(progress, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * dp)));
+        }
+
+        void describe(String name, String what) {
+            title.setText(name);
+            hint = what;
+            main.removeCallbacks(restore);
+            restore.run();
+        }
+
+        /** Something just happened (a song was added, or could not be): say so here for a moment. */
+        void say(String text, boolean good) {
+            sub.setText(text);
+            sub.setTextColor(Color.parseColor(good ? "#FFD23F" : "#FF8A80"));
+            main.removeCallbacks(restore);
+            main.postDelayed(restore, 2800);
+        }
+
+        /** How far the page has loaded, 0 to 100. The line shows only while a page is on its way. */
+        void loading(int percent) {
+            progress.animate().cancel();
+            if (percent >= 100) {
+                progress.animate().alpha(0f).setDuration(250).start();
+            } else {
+                progress.setAlpha(1f);
+                progress.animate().scaleX(Math.max(0.08f, percent / 100f)).setDuration(180).start();
+            }
+        }
+    }
+
+    /**
+     * A panel that is not being looked at is moved off the side of the screen. It keeps
+     * running there (music keeps playing), but the phone no longer spends effort drawing
+     * it underneath what the person is actually looking at.
+     */
+    private void park(View panel, boolean away) {
+        panel.setTranslationX(away ? 100000f : 0f);
+    }
+
+    /**
+     * The music services' web players live in a panel that is normally off screen.
+     * Bringing the panel on screen is only for signing in or looking at what a player is doing.
      */
     private void buildPlayerPanel() {
         if (player == null) return;
-        float dp = getResources().getDisplayMetrics().density;
         playerPanel = new LinearLayout(this);
         playerPanel.setOrientation(LinearLayout.VERTICAL);
         playerPanel.setBackgroundColor(Color.parseColor("#101011"));
-        playerBack = new TextView(this);
-        playerBack.setTextColor(Color.parseColor("#1A1606"));
-        playerBack.setBackgroundColor(Color.parseColor("#FFD23F"));
-        playerBack.setTextSize(16);
-        playerBack.setTypeface(playerBack.getTypeface(), android.graphics.Typeface.BOLD);
-        playerBack.setGravity(Gravity.CENTER_VERTICAL);
-        playerBack.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
-        playerBack.setOnClickListener(new View.OnClickListener() {
+        playerBar = new PanelBar();
+        playerBar.done.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showPlayer(null); }
         });
-        playerPanel.addView(playerBack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (56 * dp)));
+        playerBar.back.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                WebView shown = playerOnScreen == null ? null : playerOnScreen.view();
+                if (shown != null && shown.canGoBack()) shown.goBack(); else showPlayer(null);
+            }
+        });
+        playerPanel.addView(playerBar.view, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         playerStack = new FrameLayout(this);
-        for (WebPlayer w : player.web) {
+        for (final WebPlayer w : player.web) {
             WebView pv = w.view();
             if (pv.getParent() instanceof ViewGroup) ((ViewGroup) pv.getParent()).removeView(pv);
             playerStack.addView(pv, playerSize(w, false));
+            w.setLoadingListener(new WebPlayer.Loading() {
+                public void progress(int percent) { if (playerOnScreen == w) playerBar.loading(percent); }
+            });
         }
         playerPanel.addView(playerStack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(playerPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        park(playerPanel, true);
     }
 
     /**
      * The panel where a person browses their own library on a music service's website.
-     * It sits behind musync's screen until asked for.
+     * It stays off screen until asked for.
      */
     private void buildBrowsePanel() {
-        float dp = getResources().getDisplayMetrics().density;
+        browseBar = new PanelBar();
         browser = new LibraryBrowser(this, new LibraryBrowser.Listener() {
             public void onPick(Map<String, Object> song) {
+                // Say so at once; the room's answer follows in a moment.
+                browseBar.say("Adding \u201c" + Json.str(song.get("title")) + "\u201d", true);
                 // The room screen knows which room this is and who is asking; hand the song to it.
                 web.evaluateJavascript("window.musyncAddDirect && window.musyncAddDirect(" + Json.write(song) + ")", null);
             }
+            public void onProgress(int percent) { browseBar.loading(percent); }
         });
         browsePanel = new LinearLayout(this);
         browsePanel.setOrientation(LinearLayout.VERTICAL);
         browsePanel.setBackgroundColor(Color.parseColor("#101011"));
-        browseBack = new TextView(this);
-        browseBack.setTextColor(Color.parseColor("#1A1606"));
-        browseBack.setBackgroundColor(Color.parseColor("#FFD23F"));
-        browseBack.setTextSize(15);
-        browseBack.setTypeface(browseBack.getTypeface(), android.graphics.Typeface.BOLD);
-        browseBack.setGravity(Gravity.CENTER_VERTICAL);
-        browseBack.setMaxLines(2);
-        browseBack.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
-        browseBack.setOnClickListener(new View.OnClickListener() {
+        browseBar.done.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showBrowser(null); }
         });
-        browsePanel.addView(browseBack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (60 * dp)));
+        browseBar.back.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { if (!browser.goBack()) showBrowser(null); }
+        });
+        browsePanel.addView(browseBar.view, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         browsePanel.addView(browser.view(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(browsePanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        park(browsePanel, true);
     }
 
-    /** Brings a service's library to the front, or with null goes back to musync's own screen. */
+    /** Brings a service's library on screen, or with null goes back to musync's own screen. */
     private void showBrowser(String appId) {
         if (browsePanel == null) return;
         WebPlayer w = appId == null || player == null ? null : player.webFor(appId);
         browseShown = w != null;
         if (w != null) {
+            browseBar.describe(w.site.name, "Tap a song to add it to the queue");
             browser.open(w.site);
-            browseBack.setText("\u2039  Done    Tap a song in " + w.site.name + " to add it to the queue");
+            park(browsePanel, false);
             browsePanel.bringToFront();
         } else {
             browser.close();
+            park(browsePanel, true);
             web.bringToFront();
             // Signing in here also signs the built-in players in.
             if (player != null) player.recheck();
@@ -346,19 +456,23 @@ public class MainActivity extends Activity {
         return new FrameLayout.LayoutParams((int) (1100 * dp), (int) (720 * dp));
     }
 
-    /** Brings one service's web player to the front, or with null goes back to musync's own screen. */
+    /** Brings one service's web player on screen, or with null goes back to musync's own screen. */
     private void showPlayer(String appId) {
         if (playerPanel == null) return;
         WebPlayer w = appId == null ? null : player.webFor(appId);
         playerShown = w != null;
+        playerOnScreen = w;
         if (w != null) {
+            playerBar.describe(w.site.name, "in".equals(w.site.signedIn()) ? "Signed in. Songs play from here, out of sight."
+                : "Sign in, then tap Done");
             w.ensureLoaded();
             w.view().setLayoutParams(playerSize(w, true));
             w.view().bringToFront();
-            playerBack.setText("\u2039  Done with " + w.site.name);
+            park(playerPanel, false);
             playerPanel.bringToFront();
         } else {
             for (WebPlayer each : player.web) each.view().setLayoutParams(playerSize(each, false));
+            park(playerPanel, true);
             web.bringToFront();
             // Signing in changes what this phone can play and what the room screen should offer.
             player.recheck();
@@ -403,12 +517,12 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() { public void run() { showBrowser(appId); } });
         }
 
-        /** The room screen reports what happened to a song picked while browsing; shown over the library. */
+        /** The room screen reports what happened to a song picked while browsing; shown in the bar above the library. */
         @JavascriptInterface
         public void browseResult(final String text) {
             if (text == null || text.length() > 200) return;
             runOnUiThread(new Runnable() { public void run() {
-                try { android.widget.Toast.makeText(MainActivity.this, text, android.widget.Toast.LENGTH_SHORT).show(); } catch (RuntimeException ignored) { }
+                if (browseBar != null) browseBar.say(text, text.startsWith("Added"));
             } });
         }
 

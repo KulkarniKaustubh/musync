@@ -232,6 +232,12 @@ final class WebPlayer implements Room.Player {
         });
         web.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                Loading l = loading;
+                if (l != null) l.progress(newProgress);
+            }
+
+            @Override
             public void onPermissionRequest(PermissionRequest request) {
                 // Protected audio needs the page to be allowed to use the phone's media keys. Nothing else is granted.
                 for (String r : request.getResources()) {
@@ -260,6 +266,11 @@ final class WebPlayer implements Room.Player {
             return "JSON.stringify({error:'musync could not load its page reader'})";
         }
     }
+
+    /** Told how far the page has loaded, for the line shown while the person is looking at this player. */
+    interface Loading { void progress(int percent); }
+    private volatile Loading loading;
+    void setLoadingListener(Loading l) { loading = l; }
 
     WebView view() { return web; }
 

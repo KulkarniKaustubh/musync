@@ -33,9 +33,15 @@ final class LibraryBrowser {
     interface Listener {
         /** A song was tapped. The map holds app, id, title, artist and maybe art, already checked. */
         void onPick(Map<String, Object> song);
+        /** How far the page on screen has loaded, 0 to 100. */
+        void onProgress(int percent);
     }
 
-    private static final long POLL_MS = 450;
+    /** Asks an already prepared page for the songs tapped since last time; null when the page is not prepared. */
+    private static final String COLLECT =
+        "(function(){var B=window.__musyncBrowse;return B?JSON.stringify({adds:B.adds.splice(0)}):null})()";
+
+    private static final long POLL_MS = 300;
     private final WebView web;
     private final String script;
     private final Listener listener;
@@ -71,6 +77,12 @@ final class LibraryBrowser {
             + (m.find() ? m.group(1) : "126.0.0.0") + " Safari/537.36";
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                LibraryBrowser.this.listener.onProgress(newProgress);
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             @SuppressWarnings("deprecation")
@@ -130,13 +142,19 @@ final class LibraryBrowser {
         try { web.destroy(); } catch (RuntimeException ignored) { }
     }
 
+    // A couple of times a second: collect tapped songs. The collecting question is tiny;
+    // the full script is only sent when a page has not been prepared yet (a new page).
     private final Runnable poll = new Runnable() {
         public void run() {
             if (!open) return;
             try {
-                web.evaluateJavascript(script, new ValueCallback<String>() {
+                web.evaluateJavascript(COLLECT, new ValueCallback<String>() {
                     @Override
                     public void onReceiveValue(String value) {
+                        if (value == null || value.equals("null")) {
+                            try { web.evaluateJavascript(script, null); } catch (RuntimeException ignored) { }
+                            return;
+                        }
                         try { deliver(value); } catch (RuntimeException ignored) { }
                     }
                 });

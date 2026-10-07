@@ -68,6 +68,8 @@
     scope: 'all',
     playIn: '',                  // when adding: which of the host phone's services the song should play in
     scrubbing: false,            // the host is dragging through the song
+    skipping: '',                // the key of a song this person has just asked to skip
+    shownNow: '',                // the key of the song the now-playing card last showed
     search: { q: '', loading: false, songs: [], failed: [], error: '' },
     adding: new Set(),
     justAdded: null,
@@ -145,9 +147,11 @@
     events = new EventSource(`/api/rooms/${code}/events?token=${device.token}`);
     events.onmessage = (ev) => {
       const data = JSON.parse(ev.data);
-      const first = !ui.room;
+      const first = !ui.room, was = ui.room;
       ui.me = data.me;
       ui.room = data.state;
+      if (ui.skipping && (!ui.room.now || ui.room.now.key !== ui.skipping)) ui.skipping = '';
+      if (was) notice(was, ui.room);
       ui.receivedAt = Date.now();
       setOnline(true);
       // Inside the Android app, keep the host's screen on so the room keeps running.
@@ -162,6 +166,22 @@
       if (events && events.readyState === EventSource.CLOSED) recover(code);
     };
   }
+  // A short line when someone else does something: joins, or adds a song.
+  function notice(was, now) {
+    const knew = new Set(was.people.map((p) => p.id));
+    const joined = now.people.filter((p) => !knew.has(p.id) && p.id !== ui.me);
+    const had = new Set(was.queue.map((e) => e.key));
+    if (was.now) had.add(was.now.key);
+    const added = now.queue.concat(now.now ? [now.now] : []).filter((e) => !had.has(e.key) && e.by !== ui.me);
+    let text = '';
+    if (added.length === 1) text = `${nameOf(added[0].by)} added “${added[0].song.title}”`;
+    else if (added.length > 1) text = `${plural(added.length, 'song')} added`;
+    else if (joined.length === 1) text = `${joined[0].name} joined`;
+    else if (joined.length > 1) text = `${people(joined.length)} joined`;
+    // Never talk over a message the person may still be reading or acting on.
+    if (text && $('#toast').hidden) toast(text);
+  }
+
   function disconnect() {
     if (events) { events.close(); events = null; }
   }
@@ -421,7 +441,7 @@
         </div>
         <div class="roombar-actions">
           <button type="button" class="people-btn" id="open-people" data-slot="people"></button>
-          <button type="button" class="btn btn-sm" id="open-invite">${ICON.invite}Invite</button>
+          <button type="button" class="btn btn-sm" id="open-invite" aria-label="Invite friends">${ICON.invite}Invite</button>
         </div>
       </header>
       <div class="room-grid">
@@ -553,7 +573,10 @@
     const actions = [];
     if (ui.needsTap && isPlayer()) actions.push(`<button type="button" class="btn btn-sm btn-primary" id="tap-sound">${ICON.sound}Turn sound on</button>`);
     if (isHost() && running(n)) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
-    if (isHost() || mine) actions.push(`<button type="button" class="btn btn-sm" id="skip">${ICON.skip}${mine && !isHost() ? 'Skip my song' : 'Skip'}</button>`);
+    if (isHost() || mine) {
+      const busy = ui.skipping === n.key;
+      actions.push(`<button type="button" class="btn btn-sm${busy ? ' is-busy' : ''}" id="skip"${busy ? ' disabled' : ''}>${busy ? '<span class="spin" aria-hidden="true"></span>Skipping' : ICON.skip + (mine && !isHost() ? 'Skip my song' : 'Skip')}</button>`);
+    }
     if (!isHost() && playback().mode === 'preview') actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
     // The host's phone plays the song itself; sending the host to another app would be a detour.
     if (!(isHost() && playback().device)) actions.push(`<button type="button" class="btn btn-sm" id="open-full" data-key="${n.key}">${ICON.open}Open in ${esc(appName(app))}</button>`);
@@ -593,27 +616,89 @@
         <button type="button" class="bump num" data-bump="${e.key}" aria-pressed="${bumped}"
           aria-label="${bumped ? 'Take back your bump on' : 'Bump'} ${title}. ${plural(n, 'bump')}.">${bumped ? ICON.upSolid : ICON.up}<span>${n}</span></button></div>`;
     }
-    return `<li class="row${ui.justAdded === e.song.ref ? ' is-new' : ''}" data-key="${e.key}">${cover(e.song)}
+    return `<li class="row" data-key="${e.key}">${cover(e.song)}
       <div class="row-main"><span class="row-title">${title}</span><span class="row-artist">${esc(e.song.artist)}</span>
-        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b>${playback().device && e.app ? `<span>${esc(appName(e.app))}</span>` : ''}</span></div>
+        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b>${playback().device && e.app && e.app !== playback().app ? `<span class="row-app">${esc(appName(e.app))}</span>` : ''}</span></div>
       ${side}</li>`;
   }
 
-  function queueHTML() {
+  /** What the queue area shows when there are no rows. */
+  function queueEmptyHTML() {
+    const tv = ui.view === 'tv';
+    if (!ui.room.now) {
+      return tv ? '' : `<div class="empty"><b>The queue is empty</b>Songs line up here as people add them.
+        <button type="button" class="btn" data-open-invite>${ICON.invite}Invite friends</button></div>`;
+    }
+    return tv
+      ? '<div class="empty"><b>Nothing queued after this</b>Scan the code to add the next song.</div>'
+      : '<div class="empty"><b>Nothing queued after this</b>Add the next song before the room goes quiet.</div>';
+  }
+
+  /** Sets an element's content only when it differs, so nothing flickers or restarts for no reason. */
+  function setHTML(el, html) {
+    if (el._html === html) return false;
+    el._html = html;
+    el.innerHTML = html;
+    return true;
+  }
+
+  // Brings the queue on screen in line with the room, touching only what changed:
+  // a row that is the same stays the same element (its picture does not reload, a
+  // finger on it is not interrupted), a row that moved is moved, and only new or
+  // changed rows are built.
+  function renderQueue(box) {
     const tv = ui.view === 'tv', q = ui.room.queue;
     if (!q.length) {
-      if (!ui.room.now) {
-        return tv ? '' : `<div class="empty"><b>The queue is empty</b>Songs line up here as people add them.
-          <button type="button" class="btn" data-open-invite>${ICON.invite}Invite friends</button></div>`;
-      }
-      return tv
-        ? '<div class="empty"><b>Nothing queued after this</b>Scan the code to add the next song.</div>'
-        : '<div class="empty"><b>Nothing queued after this</b>Add the next song before the room goes quiet.</div>';
+      box._rows = false;
+      setHTML(box, queueEmptyHTML());
+      return;
     }
     let shown = q.length;
     if (tv) shown = q.length > ui.tvRows ? Math.max(1, ui.tvRows - 1) : q.length;
-    const more = q.length - shown;
-    return `<ol class="list">${q.slice(0, shown).map(rowHTML).join('')}</ol>${more > 0 ? `<p class="tv-more">and ${plural(more, 'more song')}</p>` : ''}`;
+    if (!box._rows) {
+      box._rows = true; box._html = null;
+      box.innerHTML = '<ol class="list"></ol><p class="tv-more" hidden></p>';
+    }
+    const list = box.firstElementChild, more = box.lastElementChild;
+    // Rows whose song has left go first, so the rows that stay are not shuffled around them.
+    const wanted = new Set(q.slice(0, shown).map((e) => e.key));
+    const have = new Map();
+    for (const el of Array.from(list.children)) {
+      if (wanted.has(el.dataset.key)) have.set(el.dataset.key, el); else el.remove();
+    }
+    let at = list.firstElementChild;
+    for (const e of q.slice(0, shown)) {
+      const html = rowHTML(e);
+      let el = have.get(e.key);
+      have.delete(e.key);
+      if (!el || el._html !== html) {
+        const t = document.createElement('template');
+        t.innerHTML = html;
+        const fresh = t.content.firstElementChild;
+        fresh._html = html;
+        fresh._bumps = e.bumps.length;
+        if (el) {
+          // Same song, something about it changed: keep its picture, and mark a changed bump count.
+          const oldCover = el.querySelector('.cover'), newCover = fresh.querySelector('.cover');
+          if (oldCover && newCover) newCover.replaceWith(oldCover);
+          if (el._bumps !== e.bumps.length) { const b = fresh.querySelector('.bump'); if (b) b.classList.add('is-changed'); }
+          if (el === at) at = el.nextElementSibling;
+          el.replaceWith(fresh);
+          list.insertBefore(fresh, at);
+        } else {
+          if (ui.justAdded === e.song.ref || box._seen) fresh.classList.add('is-new');
+          list.insertBefore(fresh, at);
+        }
+        el = fresh;
+      } else if (el !== at) {
+        list.insertBefore(el, at);
+      }
+      at = el.nextElementSibling;
+    }
+    box._seen = true; // rows that appear from now on are arrivals, not the first paint
+    const rest = q.length - shown;
+    more.hidden = rest <= 0;
+    more.textContent = rest > 0 ? `and ${plural(rest, 'more song')}` : '';
   }
 
   function peopleBtnHTML() {
@@ -649,21 +734,26 @@
       ? (active.dataset.bump ? `[data-bump="${active.dataset.bump}"]` : active.id ? '#' + active.id : null) : null;
 
     // While the host is dragging through the song, leave the card alone so the drag is not cut off.
-    if (!ui.scrubbing) slot('now').innerHTML = nowHTML();
-    q.innerHTML = queueHTML();
-    slot('count').textContent = ui.room.queue.length ? plural(ui.room.queue.length, 'song') : '';
+    const nowChanged = !ui.scrubbing && setHTML(slot('now'), nowHTML());
+    if (nowChanged) {
+      // A different song gets a short arrival; the same song updating in place does not.
+      const card = $('.now', app), key = ui.room.now ? ui.room.now.key : '';
+      if (card && ui.shownNow && ui.shownNow !== key && !instant) card.classList.add('is-fresh');
+      ui.shownNow = key;
+    }
+    renderQueue(q);
+    const count = ui.room.queue.length ? plural(ui.room.queue.length, 'song') : '';
+    if (slot('count').textContent !== count) slot('count').textContent = count;
     if (ui.view === 'room') {
       const n = ui.room.now;
-      slot('nowhead').innerHTML = !n ? 'Now playing' : setupMode() ? 'Ready to play' : !running(n) ? 'Up now' : `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}`;
-      slot('people').innerHTML = peopleBtnHTML();
+      setHTML(slot('nowhead'), !n ? 'Now playing' : setupMode() ? 'Ready to play' : !running(n) ? 'Up now' : `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}`);
+      setHTML(slot('people'), peopleBtnHTML());
       slot('roomname').textContent = isHost() ? 'Your room' : nameOf(ui.room.hostId) + '’s room';
       slot('code').textContent = roomCode();
-      const card = setupCardHTML();
-      if (slot('setup').innerHTML !== card) slot('setup').innerHTML = card;
-      const after = signInCardHTML();
-      if (slot('after').innerHTML !== after) slot('after').innerHTML = after;
+      setHTML(slot('setup'), setupCardHTML());
+      setHTML(slot('after'), signInCardHTML());
     }
-    paintProgress(true);
+    paintProgress(nowChanged || instant);
 
     if (refocus) { const el = $(refocus, app); if (el && el !== document.activeElement) el.focus({ preventScroll: true }); }
     if (!instant && !reducedMotion()) {
@@ -860,6 +950,7 @@
     input.placeholder = 'Songs or artists';
     note.textContent = s.failed.length && !s.loading && s.songs.length ? 'Some results may be missing. Try again in a moment.' : '';
 
+    $('.searchbox').classList.toggle('is-loading', !!s.loading);
     if (s.loading) {
       results.innerHTML = Array.from({ length: 6 }, () => '<li class="skel" aria-hidden="true"><i></i><div><i></i><i></i></div></li>').join('');
       return;
@@ -1127,17 +1218,46 @@
     if (t.id === 'start-room') { ui.setup = { mode: 'start', code: '', busy: false }; return go('setup'); }
     if (t.id === 'setup-back') return go('landing');
 
-    if (d.bump) return act('bump', { key: d.bump }).catch(() => {});
+    if (d.bump) {
+      // Count the bump at once so the press is felt; the room's answer puts the queue in its real order.
+      const e = ui.room.queue.find((q) => q.key === d.bump);
+      if (e) {
+        const i = e.bumps.indexOf(ui.me);
+        if (i >= 0) e.bumps.splice(i, 1); else e.bumps.push(ui.me);
+        refresh(true);
+        const b = $(`[data-bump="${d.bump}"]`, app);
+        if (b) b.focus({ preventScroll: true });
+      }
+      return act('bump', { key: d.bump }).catch((err) => toast(err.message));
+    }
     if (d.remove) {
       const e = ui.room.queue.find((q) => q.key === d.remove);
+      if (e) { ui.room.queue = ui.room.queue.filter((q) => q !== e); refresh(false); }
       return act('remove', { key: d.remove }).then(() => {
-        if (e) toast('Removed ' + e.song.title, 'Undo', () => addSong(e.song.ref));
-      }).catch(() => {});
+        if (!e) return;
+        // A song picked from a library goes back the way it came; a searched one by its catalog entry.
+        const undo = e.song.play ? () => window.musyncAddDirect({ app: e.song.play.app, id: e.song.play.id, title: e.song.title, artist: e.song.artist, art: e.song.art })
+          : () => addSong(e.song.ref);
+        toast('Removed ' + e.song.title, 'Undo', undo);
+      }).catch((err) => toast(err.message));
     }
     if (t.id === 'open-search') return openSearch();
     if (t.id === 'open-people' || t.id === 'open-invite' || 'openInvite' in d) return openPeople();
-    if (t.id === 'skip') return act('skip', { key: ui.room.now.key }).catch(() => {});
-    if (t.id === 'toggle-play') return act(ui.room.now.paused ? 'play' : 'pause').catch(() => {});
+    if (t.id === 'skip') {
+      // Show that the press landed; the room answers with the next song.
+      const key = ui.room.now.key;
+      ui.skipping = key;
+      refresh(true);
+      setTimeout(() => { if (ui.skipping === key) { ui.skipping = ''; refresh(true); } }, 4000);
+      return act('skip', { key }).catch((e) => { ui.skipping = ''; refresh(true); toast(e.message); });
+    }
+    if (t.id === 'toggle-play') {
+      // Flip the button at once; the room confirms a moment later.
+      const n = ui.room.now, pause = !n.paused;
+      n.position = position(); n.paused = pause; ui.receivedAt = Date.now();
+      refresh(true);
+      return act(pause ? 'pause' : 'play').catch((e) => toast(e.message));
+    }
     if (t.id === 'toggle-listen') {
       ui.listening = !ui.listening; ui.needsTap = false;
       syncPlayer(); refresh(true);

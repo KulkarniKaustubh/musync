@@ -140,7 +140,14 @@ svg { display: block; }
 .btn-sm { min-height: 40px; padding: 0 16px; font-size: var(--t-sm); }
 .btn-block { width: 100%; }
 .btn svg, .icon { width: 20px; height: 20px; flex: none; }
-.btn.is-busy { color: var(--text-3); }
+.btn.is-busy { color: var(--text-2); }
+/* A small turning ring: something was asked for and the answer is on its way. */
+.spin {
+  flex: none; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid color-mix(in oklab, currentColor 28%, transparent); border-top-color: currentColor;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .iconbtn {
   display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none;
@@ -278,7 +285,13 @@ svg { display: block; }
 .people-btn:hover { background: var(--layer-2); }
 .stack { display: inline-flex; }
 .stack .avatar { box-shadow: 0 0 0 2px var(--layer-1); }
-.stack .avatar + .avatar { margin-left: -8px; }
+.stack .avatar + .avatar { margin-left: -6px; }
+/* On a narrow phone the room's name matters more than the word on the invite button. */
+@media (max-width: 420px) {
+  #open-invite { width: 44px; padding: 0; font-size: 0; gap: 0; }
+  #open-invite svg { width: 20px; height: 20px; }
+  .stack .avatar:nth-child(n+3) { display: none; }
+}
 
 .room-grid { display: grid; gap: 28px; padding-top: 8px; }
 .room-col { display: grid; gap: 12px; align-content: start; min-width: 0; }
@@ -365,11 +378,21 @@ svg { display: block; }
 .row-title { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-artist { display: block; color: var(--text-2); font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-pick { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--text-2); font-size: var(--t-xs); min-width: 0; }
-.row-pick b { color: var(--text); font-weight: 700; }
+.row-pick .avatar { flex: none; }
+/* The name gives way before the service does, and neither wraps. */
+.row-pick b { flex: 0 1 auto; min-width: 4ch; color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-pick span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-pick .row-app { flex: 0 1 auto; min-width: 4ch; padding-left: 7px; border-left: 1px solid var(--line); }
 .row-side { display: flex; align-items: center; gap: 2px; }
-.row.is-new { animation: row-in .28s var(--ease); }
+.row.is-new { animation: row-in .32s var(--ease); }
 @keyframes row-in { from { opacity: 0; transform: translateY(8px); } }
+/* A bump count that just changed gives one small kick. */
+.bump.is-changed span { animation: count-kick .3s var(--ease); }
+@keyframes count-kick { 40% { transform: translateY(-3px) scale(1.25); } }
+.bump span { display: inline-block; }
+/* A new song taking over the now-playing card. */
+.now.is-fresh { animation: now-in .36s var(--ease); }
+@keyframes now-in { from { opacity: .35; transform: translateY(6px); } }
 
 .bump {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
@@ -442,6 +465,12 @@ svg { display: block; }
 .searchbox { position: relative; }
 .searchbox-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
 .searchbox-icon svg { width: 20px; height: 20px; }
+/* While a search is out, the magnifier gives way to the turning ring. */
+.searchbox.is-loading .searchbox-icon svg { display: none; }
+.searchbox.is-loading .searchbox-icon::after {
+  content: ""; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--text-2); animation: spin .7s linear infinite;
+}
 .searchbox input {
   width: 100%; min-height: 48px; padding: 0 16px 0 46px;
   border: 1px solid transparent; border-radius: 999px;
@@ -577,7 +606,7 @@ svg { display: block; }
   position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); z-index: 20;
   transform: translateX(-50%);
   display: flex; align-items: center; gap: 4px;
-  max-width: calc(100% - 32px); padding: 6px 8px 6px 18px; min-height: 48px; border-radius: 999px;
+  max-width: calc(100% - 32px); padding: 4px 8px 4px 16px; min-height: 40px; border-radius: 999px;
   background: var(--text); color: var(--bg); font-size: var(--t-sm); font-weight: 700;
   box-shadow: var(--shadow);
   animation: toast-in .2s var(--ease);

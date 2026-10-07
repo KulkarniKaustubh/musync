@@ -42,6 +42,12 @@ One shared music queue that everyone in the room adds to from their own phone.
   the browser offers "Open this room in the app" for people who have musync
   installed and want their own playlists. The room can also be added to a
   phone's home screen from the browser.
+- **Steadier, more talkative screens (0.7.1).** The queue only redraws rows
+  that changed, so pictures no longer reload and taps are not lost when the
+  room updates. Bump, pause, skip and remove respond at once; a short line
+  appears when someone else joins or adds a song. In the app, service
+  websites that are not on screen are parked off screen so the phone stops
+  drawing them, and the bar above a website shows loading and "Added".
 - **The clock follows the music.** A song's timer starts when the player
   reports it is audible and is corrected if playback drifts. The host can drag
   through the song.
