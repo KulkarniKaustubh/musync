@@ -1,4 +1,4 @@
-package app.syng.core;
+package app.musync.core;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,7 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
 /**
- * The syng server: serves the web client, keeps rooms, pushes live updates and
+ * The musync server: serves the web client, keeps rooms, pushes live updates and
  * proxies song search. One small HTTP/1.1 implementation, no dependencies.
  *
  * It runs in two places: inside the Android app, where the host's phone serves
@@ -51,7 +51,7 @@ public final class RoomServer {
     private final SecureRandom random = new SecureRandom();
     private final ExecutorService pool = Executors.newCachedThreadPool(new ThreadFactory() {
         public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "syng-http");
+            Thread t = new Thread(r, "musync-http");
             t.setDaemon(true);
             return t;
         }
@@ -91,8 +91,8 @@ public final class RoomServer {
         }
         if (socket == null) throw last;
         running = true;
-        thread("syng-accept", new Runnable() { public void run() { acceptLoop(); } });
-        thread("syng-clock", new Runnable() { public void run() { clockLoop(); } });
+        thread("musync-accept", new Runnable() { public void run() { acceptLoop(); } });
+        thread("musync-clock", new Runnable() { public void run() { clockLoop(); } });
         return socket.getLocalPort();
     }
 

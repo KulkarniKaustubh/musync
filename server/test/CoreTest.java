@@ -1,7 +1,7 @@
-import app.syng.core.Catalog;
-import app.syng.core.Json;
-import app.syng.core.Room;
-import app.syng.core.RoomServer;
+import app.musync.core.Catalog;
+import app.musync.core.Json;
+import app.musync.core.Room;
+import app.musync.core.RoomServer;
 
 import java.lang.reflect.Method;
 import java.util.List;

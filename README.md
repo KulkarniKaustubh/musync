@@ -1,4 +1,4 @@
-# syng
+# musync
 
 One shared music queue that everyone in the room adds to from their own phone.
 
@@ -13,7 +13,7 @@ One shared music queue that everyone in the room adds to from their own phone.
 - **Whole songs, in the host's own music app.** The host's phone starts each
   song in the music app the host chose (Spotify, Apple Music, YouTube Music,
   Tidal, Amazon Music, Deezer or SoundCloud), from the host's own account, and
-  moves to the next song when it ends. Pause and skip in syng control that
+  moves to the next song when it ends. Pause and skip in musync control that
   app. See "Whole songs" below for the one-time setup.
 - **Your own app.** Each person picks the music app they use. Guests get
   "Open in Spotify" (or their app) to hear a song on their own phone.
@@ -27,9 +27,9 @@ One shared music queue that everyone in the room adds to from their own phone.
 
 - **Whole songs on every phone at once.** Only the host's phone plays. Guests
   who are apart open the song in their own app; it is not kept in time.
-- **Exact matches every time.** syng asks the music app to play "title, artist"
+- **Exact matches every time.** musync asks the music app to play "title, artist"
   by search, the same way a voice assistant does. The app may pick a different
-  version; syng shows what the app actually started.
+  version; musync shows what the app actually started.
 - **Spotify Free.** Spotify only plays a chosen song on demand for Premium
   accounts. On Free it plays something related.
 - **Rooms across the internet from the phone app.** A phone can only serve
@@ -55,29 +55,29 @@ text is the useful thing to report.
 
 ## Install the Android app
 
-Install `syng.apk`. It is signed with a self-made key for sideloading, not for
+Install `musync.apk`. It is signed with a self-made key for sideloading, not for
 the Play Store, so Android will ask you to allow installs from your browser or
-file manager. It needs Android 6 or newer. Uninstall the earlier "syng
-prototype" app if you installed it.
+file manager. It needs Android 6 or newer. The app was called "syng" before
+version 0.3.1; it installs alongside that one, so uninstall "syng" first.
 
 ## Whole songs: one-time setup on the host's phone
 
 1. Start a room and pick your music app.
-2. Tap **Allow access** on the "Play whole songs" card and switch syng on.
+2. Tap **Allow access** on the "Play whole songs" card and switch musync on.
    Android calls this "notification access". It is the only way Android lets
-   one app control another app's playback. syng does not read notifications.
+   one app control another app's playback. musync does not read notifications.
 3. If Android says the setting is restricted (Android 13 and newer do this for
-   apps installed from a file): tap **Open syng's settings**, tap the three
+   apps installed from a file): tap **Open musync's settings**, tap the three
    dots at the top right, tap **Allow restricted settings**, then do step 2
    again.
 4. Add a song. If the music app has not been opened since the phone started,
-   syng opens it once to wake it up.
+   musync opens it once to wake it up.
 
 ## Run the server on a computer
 
 ```sh
-java -jar syng-server.jar            # many rooms, for hosting on the internet
-java -jar syng-server.jar --lan      # one room, like the phone app
+java -jar musync-server.jar            # many rooms, for hosting on the internet
+java -jar musync-server.jar --lan      # one room, like the phone app
 ```
 
 Then open the address it prints. Options: `--port 8787`, `--web <folder>` to
@@ -88,8 +88,8 @@ the phone's music app when testing.
 ## Build
 
 ```sh
-sh server/build.sh     # server/build/syng-server.jar   (needs a JDK)
-sh android/build.sh    # android/build/syng.apk
+sh server/build.sh     # server/build/musync-server.jar   (needs a JDK)
+sh android/build.sh    # android/build/musync.apk
 ```
 
 The Android build uses Ubuntu's packaged tools instead of Gradle:
@@ -100,7 +100,7 @@ The Android build uses Ubuntu's packaged tools instead of Gradle:
 ```sh
 cd server && sh build.sh
 javac -cp build/classes -d /tmp/t test/CoreTest.java && java -cp build/classes:/tmp/t CoreTest
-java -jar build/syng-server.jar --port 8801 --sample-catalog &
+java -jar build/musync-server.jar --port 8801 --sample-catalog &
 node test/rooms.e2e.mjs        # needs Playwright; drives a host and two guests
 ```
 
@@ -126,6 +126,6 @@ list the servers they need at the top of each file.
 - Searches go from the host's device to Apple and Deezer. Cover art and preview
   audio load directly from their servers on each device.
 - Notification access is used only to find and control the music app's
-  playback. syng's notification listener is empty and reads nothing.
+  playback. musync's notification listener is empty and reads nothing.
 - No accounts, no analytics, nothing stored on a server beyond the room while
   it is open.

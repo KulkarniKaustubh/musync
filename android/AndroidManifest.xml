@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="app.syng"
-    android:versionCode="4"
-    android:versionName="0.3.0">
+    package="app.musync"
+    android:versionCode="5"
+    android:versionName="0.3.1">
 
     <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="34" />
 
@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- The music apps syng can start songs in. Android hides other apps unless they are listed. -->
+    <!-- The music apps musync can start songs in. Android hides other apps unless they are listed. -->
     <queries>
         <package android:name="com.spotify.music" />
         <package android:name="com.apple.android.music" />
@@ -28,7 +28,7 @@
 
     <!-- Rooms are served over plain http on the local network, so cleartext must be allowed. -->
     <application
-        android:label="syng"
+        android:label="musync"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme"
         android:allowBackup="false"
@@ -47,10 +47,10 @@
         </activity>
 
         <!-- Lets the user grant "notification access", which Android requires before one app
-             may control another app's playback. syng does not read notifications. -->
+             may control another app's playback. musync does not read notifications. -->
         <service
             android:name=".android.MediaAccessService"
-            android:label="syng playback control"
+            android:label="musync playback control"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>

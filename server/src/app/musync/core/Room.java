@@ -1,4 +1,4 @@
-package app.syng.core;
+package app.musync.core;
 
 import java.util.ArrayList;
 import java.util.Collections;

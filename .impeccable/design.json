@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-10-06T21:14:09.579036+00:00",
-  "title": "Design System: syng",
+  "title": "Design System: musync",
   "extensions": {
     "colorMeta": {
       "accent": {
@@ -154,7 +154,7 @@
   ],
   "narrative": {
     "northStar": "The Familiar Player",
-    "overview": "syng looks and behaves like the streaming apps people already use, on purpose, so nobody has to learn anything. It sits next to Spotify, Apple Music and YouTube Music without borrowing any one of them, because the queue belongs to no single service.",
+    "overview": "musync looks and behaves like the streaming apps people already use, on purpose, so nobody has to learn anything. It sits next to Spotify, Apple Music and YouTube Music without borrowing any one of them, because the queue belongs to no single service.",
     "keyCharacteristics": [
       "Every song shows whose pick it is and which account it plays from.",
       "One yellow accent, used only as a fill under dark text.",

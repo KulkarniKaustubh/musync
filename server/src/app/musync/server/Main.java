@@ -1,7 +1,7 @@
-package app.syng.server;
+package app.musync.server;
 
-import app.syng.core.Catalog;
-import app.syng.core.RoomServer;
+import app.musync.core.Catalog;
+import app.musync.core.RoomServer;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -9,9 +9,9 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Runs the syng server on a computer or cloud host:
+ * Runs the musync server on a computer or cloud host:
  *
- *   java -jar syng-server.jar [--port 8787] [--web path/to/web] [--lan] [--sample-catalog]
+ *   java -jar musync-server.jar [--port 8787] [--web path/to/web] [--lan] [--sample-catalog]
  *
  * Without --web the client files bundled in the jar are served. --lan behaves
  * like the phone app (one room, code derived from this machine's address).
@@ -22,7 +22,7 @@ public final class Main {
      * Pretends to be a phone's music app so the whole-song flow can be tested on
      * a computer: every song "plays" for eight seconds and then ends.
      */
-    private static final class TestPlayer implements app.syng.core.Room.Player {
+    private static final class TestPlayer implements app.musync.core.Room.Player {
         private final boolean ready;
         private final java.util.Timer timer = new java.util.Timer(true);
         private volatile String current;
@@ -30,7 +30,7 @@ public final class Main {
 
         TestPlayer(boolean ready) { this.ready = ready; }
 
-        public void apply(final app.syng.core.Room room, final String key, java.util.Map<String, Object> song,
+        public void apply(final app.musync.core.Room room, final String key, java.util.Map<String, Object> song,
                           boolean paused, String app, boolean force) {
             if (!told) {
                 told = true;
@@ -72,7 +72,7 @@ public final class Main {
         RoomServer server = new RoomServer(files, sample ? new Catalog.Sample() : new Catalog.Live(), lan);
         if (testPlayer != null) server.setPlayer(new TestPlayer(testPlayer.equals("ready")));
         int bound = server.start(port);
-        System.out.println("syng is running on port " + bound);
+        System.out.println("musync is running on port " + bound);
         System.out.println("  on this computer: http://localhost:" + bound + "/");
         for (String a : server.addresses()) System.out.println("  on your network:  " + a);
         Thread.currentThread().join();

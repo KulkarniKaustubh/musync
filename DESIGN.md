@@ -1,5 +1,5 @@
 ---
-name: syng
+name: musync
 description: One shared music queue that anyone adds to from their own streaming app.
 colors:
   bg: "#101011"
@@ -113,13 +113,13 @@ components:
     padding: "14px"
 ---
 
-# Design System: syng
+# Design System: musync
 
 ## Overview
 
 **Creative North Star: "The Familiar Player"**
 
-syng looks and behaves like the streaming apps people already use, on purpose.
+musync looks and behaves like the streaming apps people already use, on purpose.
 The owner chose the category standard over a novelty look so that nobody has to
 learn anything: a now-playing block, a list of rows, a search sheet with filter
 chips, pill buttons. It should sit comfortably next to Spotify, Apple Music and

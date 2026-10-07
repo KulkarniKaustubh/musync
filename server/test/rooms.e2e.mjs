@@ -1,13 +1,13 @@
 // End-to-end check of a live room with three devices.
-// Start the server first:  java -cp out app.syng.server.Main --port 8801 --web ../web --sample-catalog
+// Start the server first:  java -cp out app.musync.server.Main --port 8801 --web ../web --sample-catalog
 // Then:  node test/rooms.e2e.mjs [screenshot-dir]
 import { chromium } from 'playwright';
 import fs from 'fs';
 
-const BASE = process.env.SYNG_URL || 'http://localhost:8801';
+const BASE = process.env.MUSYNC_URL || 'http://localhost:8801';
 const shots = process.argv[2];
 if (shots) fs.mkdirSync(shots, { recursive: true });
-const fontPath = process.env.SYNG_TEST_CHROMIUM || '/opt/pw-browsers/chromium';
+const fontPath = process.env.MUSYNC_TEST_CHROMIUM || '/opt/pw-browsers/chromium';
 const browser = await chromium.launch({ executablePath: fontPath });
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log((ok ? 'PASS  ' : 'FAIL  ') + name + (ok ? '' : '  ' + detail)); if (!ok) failed++; };
@@ -98,7 +98,7 @@ check('the host can remove any song', await host.locator('[data-remove]').count(
 check('only the host sees pause', await host.locator('#toggle-play').count() === 1 && await dev.locator('#toggle-play').count() === 0);
 check('a guest cannot skip someone else’s song', await dev.locator('#skip').count() === 0);
 const denied = await dev.evaluate(async (c) => {
-  const s = JSON.parse(localStorage.getItem('syng'));
+  const s = JSON.parse(localStorage.getItem('musync'));
   const r = await fetch(`/api/rooms/${c}/act`, { method: 'POST', body: JSON.stringify({ token: s.token, type: 'pause' }) });
   return r.status;
 }, code);

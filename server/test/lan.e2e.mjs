@@ -1,11 +1,11 @@
 // Checks the phone-hosted ("LAN") mode: what the host shows to friends, and
 // joining from a second device by link and by typed code.
 // Start two servers first, both in LAN mode, standing in for two phones:
-//   java -jar build/syng-server.jar --lan --port 8787 --sample-catalog    (the host's phone)
-//   java -jar build/syng-server.jar --lan --port 8790 --sample-catalog    (a guest's phone)
+//   java -jar build/musync-server.jar --lan --port 8787 --sample-catalog    (the host's phone)
+//   java -jar build/musync-server.jar --lan --port 8790 --sample-catalog    (a guest's phone)
 import { chromium } from 'playwright';
 
-const browser = await chromium.launch({ executablePath: process.env.SYNG_TEST_CHROMIUM || '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath: process.env.MUSYNC_TEST_CHROMIUM || '/opt/pw-browsers/chromium' });
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log((ok ? 'PASS  ' : 'FAIL  ') + name + (ok ? '' : '  ' + detail)); if (!ok) failed++; };
 const page = async () => (await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', reducedMotion: 'reduce' })).newPage();

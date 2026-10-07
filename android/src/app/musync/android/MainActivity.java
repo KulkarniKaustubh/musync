@@ -1,4 +1,4 @@
-package app.syng.android;
+package app.musync.android;
 
 import android.app.Activity;
 import android.content.Context;
@@ -24,8 +24,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import app.syng.core.Catalog;
-import app.syng.core.RoomServer;
+import app.musync.core.Catalog;
+import app.musync.core.RoomServer;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,7 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The syng Android app.
+ * The musync Android app.
  *
  * It starts the room server on this phone and shows the web client from it.
  * When this phone starts a room, everyone on the same Wi-Fi can join from
@@ -64,14 +64,14 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setTextZoom(100);
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
-        web.addJavascriptInterface(new Bridge(), "SyngNative");
+        web.addJavascriptInterface(new Bridge(), "MusyncNative");
         web.setWebViewClient(new Client());
         setContentView(web);
 
         String problem = startServer();
         if (problem != null) {
             web.loadData("<body style='background:#101011;color:#f4f4f5;font:16px sans-serif;padding:24px'>"
-                    + "<h2>syng couldn’t start</h2><p>" + problem + "</p><p>Close other copies of syng and open it again.</p>",
+                    + "<h2>musync couldn’t start</h2><p>" + problem + "</p><p>Close other copies of musync and open it again.</p>",
                     "text/html; charset=utf-8", "utf-8");
         } else if (saved == null) {
             web.loadUrl(home());
@@ -102,7 +102,7 @@ public class MainActivity extends Activity {
                 public void run() {
                     try { bound[0] = s.start(RoomServer.DEFAULT_PORT); } catch (IOException ignored) { }
                 }
-            }, "syng-start");
+            }, "musync-start");
             t.start();
             try { t.join(5000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             if (bound[0] < 0) return "The room server could not open a port on this phone.";
@@ -177,7 +177,7 @@ public class MainActivity extends Activity {
     /** Back closes a sheet or steps back inside the app; from the start screen it sends the app to the background. */
     @Override
     public void onBackPressed() {
-        web.evaluateJavascript("window.syngBack ? window.syngBack() : '0'", new ValueCallback<String>() {
+        web.evaluateJavascript("window.musyncBack ? window.musyncBack() : '0'", new ValueCallback<String>() {
             @Override
             public void onReceiveValue(String value) {
                 if (value == null || !value.contains("1")) moveTaskToBack(true);
@@ -200,13 +200,13 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** "granted" once syng may control music playback, otherwise "missing". */
+        /** "granted" once musync may control music playback, otherwise "missing". */
         @JavascriptInterface
         public String mediaAccess() {
             return AppPlayer.hasAccess(getApplicationContext()) ? "granted" : "missing";
         }
 
-        /** Opens the Android screen where the user allows syng to control playback. */
+        /** Opens the Android screen where the user allows musync to control playback. */
         @JavascriptInterface
         public void requestMediaAccess() {
             try {
@@ -218,7 +218,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Opens syng's own page in Settings, where "Allow restricted settings" lives on newer phones. */
+        /** Opens musync's own page in Settings, where "Allow restricted settings" lives on newer phones. */
         @JavascriptInterface
         public void openAppSettings() {
             try {
@@ -271,8 +271,8 @@ public class MainActivity extends Activity {
                     main.postDelayed(new Runnable() { public void run() { web.loadUrl(home()); } }, 500);
                 } else {
                     view.loadData("<body style='background:#101011;color:#f4f4f5;font:16px sans-serif;padding:24px'>"
-                            + "<h2>syng couldn’t open its screen</h2><p>The part of the app that runs the room did not answer.</p>"
-                            + "<p>Close syng completely and open it again. If this keeps happening, report this detail: " + why + "</p>",
+                            + "<h2>musync couldn’t open its screen</h2><p>The part of the app that runs the room did not answer.</p>"
+                            + "<p>Close musync completely and open it again. If this keeps happening, report this detail: " + why + "</p>",
                             "text/html; charset=utf-8", "utf-8");
                 }
                 return;

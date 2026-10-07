@@ -1,4 +1,4 @@
-package app.syng.android;
+package app.musync.android;
 
 import android.app.SearchManager;
 import android.content.ComponentName;
@@ -18,7 +18,7 @@ import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 
-import app.syng.core.Room;
+import app.musync.core.Room;
 
 import java.util.HashMap;
 import java.util.List;
@@ -30,10 +30,10 @@ import java.util.Map;
  *
  * Every Android music app that works with car screens and voice assistants
  * accepts a standard "play this search" command through its media session.
- * With notification access, syng can find that session, send the command for
+ * With notification access, musync can find that session, send the command for
  * each song in the queue, watch the playback position, and tell the room when
  * the song is over. The music itself comes from the host's own account in
- * their own app; syng never touches the audio.
+ * their own app; musync never touches the audio.
  *
  * All work happens on one background thread.
  */
@@ -73,7 +73,7 @@ final class AppPlayer implements Room.Player {
 
     AppPlayer(Context ctx) {
         this.ctx = ctx.getApplicationContext();
-        HandlerThread t = new HandlerThread("syng-player");
+        HandlerThread t = new HandlerThread("musync-player");
         t.start();
         h = new Handler(t.getLooper());
     }
@@ -88,7 +88,7 @@ final class AppPlayer implements Room.Player {
         return a == null ? "your music app" : a[1];
     }
 
-    /** True once the user has granted notification access to syng. */
+    /** True once the user has granted notification access to musync. */
     static boolean hasAccess(Context c) {
         try {
             String on = Settings.Secure.getString(c.getContentResolver(), "enabled_notification_listeners");
@@ -272,7 +272,7 @@ final class AppPlayer implements Room.Player {
 
     /**
      * Last resort: ask the music app itself to play the song. That brings it to
-     * the front, which Android only allows while syng is on screen.
+     * the front, which Android only allows while musync is on screen.
      */
     private void launchOrAsk(String pkg) {
         if (sent) return;
@@ -285,11 +285,11 @@ final class AppPlayer implements Room.Player {
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 ctx.startActivity(i);
                 sent = true;
-                status("starting", "Opened " + name + " to start the song. Come back to syng once it plays.");
+                status("starting", "Opened " + name + " to start the song. Come back to musync once it plays.");
                 return;
             } catch (RuntimeException ignored) { }
         }
-        status("needs-open", "Open " + name + " once so syng can start songs in it.");
+        status("needs-open", "Open " + name + " once so musync can start songs in it.");
     }
 
     private final Runnable poll = new Runnable() {
@@ -313,7 +313,7 @@ final class AppPlayer implements Room.Player {
         if (controller == null) {
             if (age > 12000 && !warned) {
                 warned = true;
-                status("needs-open", "Open " + nameOf(app) + " once so syng can start songs in it.");
+                status("needs-open", "Open " + nameOf(app) + " once so musync can start songs in it.");
             }
             return;
         }

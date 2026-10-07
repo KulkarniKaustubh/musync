@@ -1,5 +1,5 @@
-/* syng web client.
-   Talks to the syng server (server/ in this repo) that runs inside the Android
+/* musync web client.
+   Talks to the musync server (server/ in this repo) that runs inside the Android
    app or standalone. The server owns the room; this file shows it, sends
    actions, and plays the 30-second previews on the host's device. */
 (() => {
@@ -32,8 +32,8 @@
   // ---------- this device ----------
 
   const store = {
-    read() { try { return JSON.parse(localStorage.getItem('syng') || 'null') || {}; } catch (_) { return {}; } },
-    write(v) { try { localStorage.setItem('syng', JSON.stringify(v)); } catch (_) { /* private mode */ } },
+    read() { try { return JSON.parse(localStorage.getItem('musync') || 'null') || {}; } catch (_) { return {}; } },
+    write(v) { try { localStorage.setItem('musync', JSON.stringify(v)); } catch (_) { /* private mode */ } },
   };
   const saved = store.read();
   function newToken() {
@@ -83,7 +83,7 @@
   // the host's own music app; "preview" means 30-second clips in the browser.
   const playback = () => (ui.room && ui.room.playback) || { mode: 'preview', app: '', device: false, status: '', detail: '' };
   const fullMode = () => playback().mode === 'full';
-  const native = () => window.SyngNative || null;
+  const native = () => window.MusyncNative || null;
 
   // ---------- server ----------
 
@@ -127,7 +127,7 @@
       ui.receivedAt = Date.now();
       setOnline(true);
       // Inside the Android app, keep the host's screen on so the room keeps running.
-      if (window.SyngNative && window.SyngNative.keepAwake) window.SyngNative.keepAwake(isHost());
+      if (window.MusyncNative && window.MusyncNative.keepAwake) window.MusyncNative.keepAwake(isHost());
       if (ui.view !== 'room' && ui.view !== 'tv') { ui.view = 'room'; render(); } else refresh(first);
       syncPlayer();
     };
@@ -253,7 +253,7 @@
 
   /** Opens an outside link: through the Android app when we are inside it, otherwise a new tab. */
   function openOutside(url) {
-    if (window.SyngNative && window.SyngNative.open) window.SyngNative.open(url);
+    if (window.MusyncNative && window.MusyncNative.open) window.MusyncNative.open(url);
     else window.open(url, '_blank', 'noopener');
   }
 
@@ -330,7 +330,7 @@
   function landingHTML() {
     return `<main class="landing">
       <div class="landing-main">
-        <p class="wordmark">syng</p>
+        <p class="wordmark">musync</p>
         <h1>One queue for everyone’s music.</h1>
         <p class="landing-lede">Start a room and share the code. Friends add songs from their own phones.</p>
         ${ui.notice ? `<p class="notice" role="status">${esc(ui.notice)}</p>` : ''}
@@ -365,7 +365,7 @@
   function setupHTML() {
     const joining = ui.setup.mode === 'join';
     return `<main class="setup">
-      <div class="setup-top"><button type="button" class="iconbtn" id="setup-back" aria-label="Back">${ICON.back}</button><span class="wordmark">syng</span></div>
+      <div class="setup-top"><button type="button" class="iconbtn" id="setup-back" aria-label="Back">${ICON.back}</button><span class="wordmark">musync</span></div>
       <div><h1>${joining ? 'Join room ' + esc(ui.setup.code) : 'Start a room'}</h1>
         <p class="setup-sub">Two things and you’re in.</p></div>
       <form id="setup-form" novalidate>
@@ -417,7 +417,7 @@
 
   function tvHTML() {
     return `<main class="tv force-dark">
-      <div class="tv-top"><span class="wordmark">syng</span>
+      <div class="tv-top"><span class="wordmark">musync</span>
         <button type="button" class="btn btn-sm" id="tv-exit">Exit big screen</button></div>
       <div class="tv-grid">
         <section class="tv-now" data-slot="now" aria-label="Now playing"></section>
@@ -468,11 +468,11 @@
         <div class="now-actions"><button type="button" class="btn btn-sm" id="change-app">Change app</button></div></div>`;
     }
     return `<div class="card"><b>Play whole songs in ${app}</b>
-      <p>The room is playing 30-second previews. syng can start each song in your ${app} app instead, from your own account.</p>
-      <p>Android asks for “notification access” before one app may control another’s playback. syng uses it only for that and does not read your notifications.</p>
+      <p>The room is playing 30-second previews. musync can start each song in your ${app} app instead, from your own account.</p>
+      <p>Android asks for “notification access” before one app may control another’s playback. musync uses it only for that and does not read your notifications.</p>
       <div class="now-actions"><button type="button" class="btn btn-sm btn-primary" id="grant-access">Allow access</button></div>
-      <p class="card-help">If Android says the setting is restricted: open syng’s settings, tap the three dots at the top, then “Allow restricted settings”, and try again.</p>
-      <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open syng’s settings</button></div></div>`;
+      <p class="card-help">If Android says the setting is restricted: open musync’s settings, tap the three dots at the top, then “Allow restricted settings”, and try again.</p>
+      <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open musync’s settings</button></div></div>`;
   }
 
   function nowHTML() {
@@ -558,7 +558,7 @@
   function render() {
     const v = ui.view;
     app.innerHTML = v === 'room' ? roomHTML() : v === 'tv' ? tvHTML() : v === 'setup' ? setupHTML()
-      : v === 'landing' ? landingHTML() : '<main class="loading"><p class="wordmark">syng</p></main>';
+      : v === 'landing' ? landingHTML() : '<main class="loading"><p class="wordmark">musync</p></main>';
     document.body.classList.toggle('is-tv', v === 'tv');
     if (v === 'tv') drawQR($('#tv-qr'));
     if (v === 'room' || v === 'tv') refresh(true);
@@ -833,7 +833,7 @@
             <button type="button" class="btn btn-sm" id="copy-link">${ICON.copy}Copy invite link</button></div></div>
         <p class="invite-help">${ui.info.lan ? 'Friends on the same Wi-Fi scan the code or open' : 'Friends scan the code or open'} <span class="invite-link">${esc(link)}</span></p>` : `
         <div class="notice"><b>Friends can’t reach this phone yet</b>
-          <p>syng couldn’t find this phone’s Wi-Fi address. Connect to Wi-Fi, or turn on your hotspot and have friends join it.</p>
+          <p>musync couldn’t find this phone’s Wi-Fi address. Connect to Wi-Fi, or turn on your hotspot and have friends join it.</p>
           <button type="button" class="btn btn-sm" id="check-address">Check again</button></div>
         <form id="address-form" class="address-form" novalidate>
           <label class="field-label" for="address-input">Or enter this phone’s Wi-Fi address</label>
@@ -938,7 +938,7 @@
 
   // The Android app calls this for the system back button. "1" means the press
   // was used here; "0" lets the app go to the background.
-  window.syngBack = () => {
+  window.musyncBack = () => {
     const open = document.querySelector('dialog[open]');
     if (open) { open.close(); return '1'; }
     if (ui.view === 'tv') { go('room'); return '1'; }

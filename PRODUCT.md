@@ -16,7 +16,7 @@ jar. Chosen so the whole thing builds without Gradle or a framework.
 
 Friends who want to listen to music together and who do not all use the same
 streaming service. Each person already has a service they pay for and an app
-they know. They use syng in two situations, both confirmed:
+they know. They use musync in two situations, both confirmed:
 
 - In the same room: a party, a car, a dorm. Phones in hand, attention split,
   often dim light.
@@ -35,7 +35,7 @@ than the host adding a song in under a minute without asking how.
 ## Positioning
 
 Shared queues exist, but each one runs through a single host account on a
-single service. In syng the queue is service-neutral: every person searches the
+single service. In musync the queue is service-neutral: every person searches the
 service they use, and a song plays from the account of whoever added it.
 
 ## Operating Context
@@ -88,9 +88,9 @@ Still undecided:
 
 ## Brand Commitments
 
-- The name is syng, written lowercase.
+- The name is musync, written lowercase.
 - Standing visual preference, chosen by the owner on 2026-10-06: the familiar
-  look and conventions of mainstream streaming apps, played straight. syng
+  look and conventions of mainstream streaming apps, played straight. musync
   should feel at home next to Spotify, Apple Music and YouTube Music, and match
   their level of polish. It must not borrow any one service's color, logo or
   layout, because the queue is service-neutral.

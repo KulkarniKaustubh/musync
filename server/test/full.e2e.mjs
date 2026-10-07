@@ -1,10 +1,10 @@
 // Checks whole-song mode from the client's side, with a stand-in for the phone's music app.
 // Start two servers first:
-//   java -jar build/syng-server.jar --lan --port 8791 --sample-catalog --test-player ready
-//   java -jar build/syng-server.jar --lan --port 8789 --sample-catalog --test-player no-access
+//   java -jar build/musync-server.jar --lan --port 8791 --sample-catalog --test-player ready
+//   java -jar build/musync-server.jar --lan --port 8789 --sample-catalog --test-player no-access
 import { chromium } from 'playwright';
 
-const browser = await chromium.launch({ executablePath: process.env.SYNG_TEST_CHROMIUM || '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch({ executablePath: process.env.MUSYNC_TEST_CHROMIUM || '/opt/pw-browsers/chromium' });
 let failed = 0;
 const check = (name, ok, detail = '') => { console.log((ok ? 'PASS  ' : 'FAIL  ') + name + (ok ? '' : '  ' + detail)); if (!ok) failed++; };
 const shots = process.argv[2];
@@ -13,7 +13,7 @@ async function page(nativeStub) {
   const p = await ctx.newPage();
   if (nativeStub) await p.addInitScript(() => {
     window.__calls = [];
-    window.SyngNative = { open: (u) => window.__calls.push('open ' + u), keepAwake: () => {}, mediaAccess: () => 'missing',
+    window.MusyncNative = { open: (u) => window.__calls.push('open ' + u), keepAwake: () => {}, mediaAccess: () => 'missing',
       requestMediaAccess: () => window.__calls.push('requestMediaAccess'), openAppSettings: () => window.__calls.push('openAppSettings'),
       openApp: (a) => window.__calls.push('openApp ' + a) };
   });

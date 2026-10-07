@@ -1,4 +1,4 @@
-package app.syng.core;
+package app.musync.core;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -164,7 +164,7 @@ public abstract class Catalog {
             c.setConnectTimeout(6000);
             c.setReadTimeout(8000);
             c.setRequestProperty("Accept", "application/json");
-            c.setRequestProperty("User-Agent", "syng/0.2");
+            c.setRequestProperty("User-Agent", "musync/0.2");
             try {
                 int code = c.getResponseCode();
                 if (code != 200) throw new IOException("HTTP " + code + " from " + c.getURL().getHost());
