@@ -121,15 +121,23 @@ final class WebPlayer implements Room.Player {
             }
         }
         String startJs() {
-            // Press the song page's own play button, once. If nothing moves after a while, allow one more press.
+            // Press the song page's own play button. If the clock has not moved a while later, press
+            // again, and after that try the play button in the player bar instead.
             return "var S=window.__musync||(window.__musync={});"
                 + "if(location.pathname.indexOf('/track/')<0)return;"
-                + "if(S.clicked&&!S.adv&&Date.now()-S.clickedAt>9000&&(S.tries||0)<2){S.clicked=false;}"
+                + "if(S.clicked&&!S.adv&&Date.now()-S.clickedAt>7000&&(S.tries||0)<3){S.clicked=false;}"
                 + "if(S.clicked)return;"
                 + "var b=document.querySelector('[data-testid=\"action-bar-row\"] [data-testid=\"play-button\"]')"
                 + "||document.querySelector('main [data-testid=\"play-button\"]')"
                 + "||document.querySelector('[data-testid=\"play-button\"]');"
-                + "if(b){S.clicked=true;S.clickedAt=Date.now();S.tries=(S.tries||0)+1;b.click();}";
+                + "if((S.tries||0)>=2)b=document.querySelector('[data-testid=\"control-button-playpause\"]')||b;"
+                + "if(!b)return;"
+                + "S.clicked=true;S.clickedAt=Date.now();S.tries=(S.tries||0)+1;"
+                // A real press, as the page's own handlers expect it, then the plain click.
+                + "var c=b.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:c.left+c.width/2,clientY:c.top+c.height/2};"
+                + "try{b.dispatchEvent(new PointerEvent('pointerdown',o));b.dispatchEvent(new MouseEvent('mousedown',o));"
+                + "b.dispatchEvent(new PointerEvent('pointerup',o));b.dispatchEvent(new MouseEvent('mouseup',o));}catch(e){}"
+                + "b.click();";
         }
         String command(String what, long ms) {
             if (what.equals("seek")) {

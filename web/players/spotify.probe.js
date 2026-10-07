@@ -31,9 +31,26 @@
     take(main.querySelectorAll('[data-testid="tracklist-row"] a[href*="/track/"]'));
     take(main.querySelectorAll('a[href*="/track/"]'));
 
-    // The player bar at the bottom.
-    var t = seconds(q('[data-testid="playback-position"]'));
-    var d = seconds(q('[data-testid="playback-duration"]'));
+    // The player bar at the bottom. Its clock is read three ways, most direct first:
+    // the two time labels, the progress slider, then any pair of times in the bar.
+    var posEl = q('[data-testid="playback-position"]'), durEl = q('[data-testid="playback-duration"]');
+    var t = seconds(posEl), d = seconds(durEl), how = 'labels';
+    var slider = q('[data-testid="playback-progressbar"] input[type="range"]');
+    if ((t < 0 || d <= 0) && slider && +slider.max > 0) {
+      var unit = +slider.max > 20000 ? 1000 : 1; // the slider counts in milliseconds or in seconds
+      t = Math.floor(+slider.value / unit); d = Math.floor(+slider.max / unit); how = 'slider';
+    }
+    if (t < 0 || d <= 0) {
+      var bar = q('[data-testid="now-playing-bar"]') || q('footer');
+      var times = [];
+      if (bar) {
+        var els = bar.querySelectorAll('div, span');
+        for (var k = 0; k < els.length && times.length < 4; k++) {
+          if (els[k].children.length === 0 && seconds(els[k]) >= 0) times.push(seconds(els[k]));
+        }
+      }
+      if (times.length >= 2 && times[times.length - 1] > 0) { t = times[0]; d = times[times.length - 1]; how = 'bar text'; }
+    }
     var now = Date.now();
     if (t !== S.last) { if (S.last >= 0 && t >= 0) S.changedAt = now; S.last = t; }
     S.adv = now - S.changedAt < 2600; // the clock moved within the last few seconds
@@ -46,6 +63,23 @@
     var nowId = link ? trackIn(link.getAttribute('href')) : '';
     // Something is playing that is not a track: an advert between songs.
     var ad = !paused && !!widget && !nowId || !!q('[data-testid="context-item-info-ad-subtitle"]');
+
+    function text(el) { return el ? (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60) : ''; }
+    function note() {
+      var pp = q('[data-testid="control-button-playpause"]');
+      var alert = q('[role="alert"], [aria-live="assertive"], [data-testid*="error"], [data-testid*="snackbar"], [data-encore-id="banner"]');
+      var md = navigator.mediaSession && navigator.mediaSession.metadata;
+      return 'play button: ' + (q('[data-testid="play-button"]') ? 'yes' : 'no')
+        + ', pressed: ' + (S.tries || 0)
+        + ', bar button: ' + (pp ? '“' + (pp.getAttribute('aria-label') || '?') + '”' : 'none')
+        + ', clock: ' + (t >= 0 && d > 0 ? t + 's of ' + d + 's by ' + how : 'none')
+        + ' (labels “' + text(posEl) + '” “' + text(durEl) + '”, slider ' + (slider ? slider.value + '/' + slider.max : 'none') + ')'
+        + ', now playing: ' + (widget ? (nowId ? 'a track' : '“' + text(widget) + '”') : 'nothing')
+        + ', media: ' + state + (md && md.title ? ' “' + String(md.title).slice(0, 30) + '”' : '')
+        + ', width: ' + window.innerWidth
+        + (alert && text(alert) ? ', message: “' + text(alert) + '”' : '')
+        + ', log in shown: ' + (q('[data-testid="login-button"]') ? 'yes' : 'no');
+    }
 
     var path = location.pathname;
     return JSON.stringify({
@@ -61,10 +95,7 @@
       ad: ad,
       rows: document.querySelectorAll('[data-testid="tracklist-row"]').length,
       // Shown in the message when a song will not start, to tell what the page offered.
-      note: 'play button: ' + (q('[data-testid="play-button"]') ? 'yes' : 'no')
-        + ', player bar: ' + (q('[data-testid="control-button-playpause"]') ? 'yes' : 'no')
-        + ', clock: ' + (t >= 0 ? t + 's of ' + d + 's' : 'none')
-        + ', log in shown: ' + (q('[data-testid="login-button"]') ? 'yes' : 'no')
+      note: note()
     });
   } catch (e) {
     return JSON.stringify({ error: String(e) });
