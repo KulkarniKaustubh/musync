@@ -34,9 +34,23 @@ final class HostPlayer implements Room.Player {
         return null;
     }
 
+    /**
+     * Spotify's website does not reliably play inside an app, but the Spotify app takes
+     * requests from other apps once the person has allowed it. So when the Spotify app
+     * is on this phone and musync may control it, Spotify songs go there.
+     */
+    boolean viaApp(String app) {
+        return "spotify".equals(app) && apps.isInstalled(app) && AppPlayer.hasAccess(ctx);
+    }
+
+    /** "web" when this phone plays the service in a built-in web player, "app" when it drives the installed app. */
+    String kind(String app) {
+        return webFor(app) != null && !viaApp(app) ? "web" : "app";
+    }
+
     private Room.Player playerFor(String app) {
         WebPlayer w = webFor(app);
-        return w != null ? w : apps;
+        return w != null && !viaApp(app) ? w : apps;
     }
 
     @Override

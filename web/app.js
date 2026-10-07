@@ -508,6 +508,11 @@
       if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app" data-app="${esc(playingIn)}">Open ${esc(appName(playingIn))}</button>`;
       if (pb.status === 'failed' || pb.status === 'needs-open') action += '<button type="button" class="btn btn-sm" id="retry-play">Try again</button>';
       if (pb.status === 'failed' && playerKind(playingIn) === 'web') action += `<button type="button" class="btn btn-sm" data-show-player="${esc(playingIn)}">Show ${esc(appName(playingIn))}</button>`;
+      // The service's own app is on this phone and musync has not been allowed to control it yet: offer that route.
+      const n = native();
+      let viaApp = false;
+      try { viaApp = pb.status === 'failed' && playerKind(playingIn) === 'web' && !!n.appInstalled && n.appInstalled(playingIn) && n.mediaAccess() !== 'granted'; } catch (_) { viaApp = false; }
+      if (viaApp) action += `<button type="button" class="btn btn-sm btn-primary" id="grant-access">Play through the ${esc(appName(playingIn))} app</button>`;
     }
     return `<div class="now-note"><p>${esc(pb.detail)}</p>${action ? `<div class="now-actions">${action}</div>` : ''}</div>`;
   }

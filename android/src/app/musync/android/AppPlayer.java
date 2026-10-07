@@ -18,6 +18,8 @@ import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 
+import app.musync.core.Catalog;
+import app.musync.core.Json;
 import app.musync.core.Room;
 
 import java.util.HashMap;
@@ -251,12 +253,35 @@ final class AppPlayer implements Room.Player {
 
     private void send(MediaController c) {
         try {
-            c.getTransportControls().playFromSearch(query(), describe());
+            String exact = exactUri();
+            if (exact != null) {
+                // The song was picked from this very service: ask for exactly that track.
+                c.getTransportControls().playFromUri(android.net.Uri.parse(exact), new Bundle());
+            } else {
+                c.getTransportControls().playFromSearch(query(), describe());
+            }
             sent = true;
             requests++;
         } catch (RuntimeException e) {
             status("failed", nameOf(app) + " refused the request (" + e.getClass().getSimpleName() + ").");
         }
+    }
+
+    /** The app's own address for the song, when the song came from this app's service; otherwise null. */
+    private String exactUri() {
+        if (song == null) return null;
+        Map<String, Object> play = Json.obj(song.get("play"));
+        String id = str(play.get("id"));
+        if ("spotify".equals(app) && "spotify".equals(str(play.get("app"))) && Catalog.validDirect("spotify", id)) {
+            return "spotify:track:" + id;
+        }
+        return null;
+    }
+
+    /** Whether the music app is on this phone. */
+    boolean isInstalled(String appId) {
+        String pkg = packageOf(appId);
+        return pkg != null && installed(pkg);
     }
 
     /** An app that is already running has a session we can talk to straight away. */

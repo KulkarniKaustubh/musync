@@ -25,6 +25,13 @@ One shared music queue that everyone in the room adds to from their own phone.
   buttons and reads its clock, which is the most fragile of the three. This
   drives other companies' websites by script: it is against their terms, fine
   only for private use, and will break when a site changes.
+- **Spotify through the Spotify app (0.7.2).** Spotify's website has not
+  played inside the app on a real phone so far. When the Spotify app is
+  installed and musync has been allowed to control playback ("notification
+  access"), Spotify songs are sent to the Spotify app instead, in the
+  background: the exact track for songs picked from a Spotify library, a
+  search by title and artist otherwise. Without the app or the permission,
+  the website route is still used. Not yet confirmed on a phone.
 - **Each song plays in its picker's service.** A song plays in the service the
   person who added it uses, when the host's phone can play that service;
   otherwise in the host's. When the phone can play more than one, the search

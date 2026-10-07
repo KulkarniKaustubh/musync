@@ -500,7 +500,13 @@ public class MainActivity extends Activity {
         /** "web" when musync plays this music app's songs in its own built-in web player, otherwise "app". */
         @JavascriptInterface
         public String playerKind(String appId) {
-            return player != null && player.webFor(appId) != null ? "web" : "app";
+            return player != null ? player.kind(appId) : "app";
+        }
+
+        /** Whether the music app itself is installed on this phone. */
+        @JavascriptInterface
+        public boolean appInstalled(String appId) {
+            return player != null && player.apps.isInstalled(appId);
         }
 
         /** The music services whose libraries can be browsed in this app, as a JSON list of ids. */
@@ -530,7 +536,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String webSignedIn(String appId) {
             WebPlayer w = player == null ? null : player.webFor(appId);
-            return w == null ? "none" : w.site.signedIn();
+            // A service played through its installed app needs no sign-in here.
+            return w == null || player.viaApp(appId) ? "none" : w.site.signedIn();
         }
 
         /** Brings a built-in web player to the front, for signing in. */
