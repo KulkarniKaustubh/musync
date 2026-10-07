@@ -88,6 +88,7 @@ await host.waitForFunction(() => document.querySelectorAll('[data-slot="queue"] 
 check('guest’s song arrives last', (await titles(host))[2] === 'Dreams', (await titles(host)).join(' | '));
 await dev.locator('[data-slot="queue"] .row:has-text("Dreams") [data-bump]').click();
 await host.waitForFunction(() => document.querySelector('[data-slot="queue"] .row-title').textContent === 'Dreams');
+await maya2.waitForFunction(() => document.querySelector('[data-slot="queue"] .row-title').textContent === 'Dreams');
 check('a bump moves the song to the top on every device', (await titles(maya2))[0] === 'Dreams');
 check('the bumper’s pill is pressed', await dev.locator('[data-slot="queue"] .row:has-text("Dreams") [data-bump]').getAttribute('aria-pressed') === 'true');
 

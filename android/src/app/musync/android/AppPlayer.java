@@ -107,9 +107,19 @@ final class AppPlayer implements Room.Player {
 
     void setForeground(boolean fg) { foreground = fg; }
 
-    /** Looks again at whether whole songs are possible (access granted, app installed). */
-    void recheck() {
-        h.post(new Runnable() { public void run() { checkMode(); } });
+    /** Whether this phone can play songs in the given installed music app right now. */
+    @Override
+    public String check(String appId) {
+        String pkg = packageOf(appId);
+        if (pkg == null || !installed(pkg)) return "no-app";
+        return hasAccess(ctx) ? "ok" : "no-access";
+    }
+
+    void seek(final String k, final long ms) {
+        h.post(new Runnable() { public void run() {
+            if (k == null || !k.equals(key) || controller == null) return;
+            try { controller.getTransportControls().seekTo(ms); } catch (RuntimeException ignored) { }
+        } });
     }
 
     /** Stops the sound and forgets the room; used when the host switches to the built-in web player. */
@@ -126,26 +136,21 @@ final class AppPlayer implements Room.Player {
     }
 
     @Override
+    public void seek(Room r, String k, long ms) { seek(k, ms); }
+
+    @Override
     public void apply(final Room r, final String k, final Map<String, Object> s, final boolean p, final String a, final boolean force) {
         h.post(new Runnable() { public void run() { handle(r, k, s, p, a, force); } });
     }
 
     // ---------- player thread ----------
 
+    /** Access was taken away, or something else changed under us: have the room ask again. */
     private void checkMode() {
         Room r = room;
-        if (r == null) return;
-        String appId = r.hostApp();
-        String pkg = packageOf(appId);
-        try {
-            if (!hasAccess(ctx)) {
-                r.playerMode(false, "no-access", "");
-            } else if (pkg == null || !installed(pkg)) {
-                r.playerMode(false, "no-app", nameOf(appId) + " isn’t installed on this phone.");
-            } else if (!r.isFull()) {
-                r.playerMode(true, "ok", "");
-            }
-        } catch (RuntimeException ignored) { }
+        if (r != null) {
+            try { r.playerRecheck(); } catch (RuntimeException ignored) { }
+        }
     }
 
     private boolean installed(String pkg) {
@@ -158,7 +163,6 @@ final class AppPlayer implements Room.Player {
     }
 
     private void handle(Room r, String k, Map<String, Object> s, boolean p, String a, boolean force) {
-        boolean newRoom = room != r;
         room = r;
         if (a == null) a = "";
         if (!a.equals(app)) {
@@ -168,9 +172,6 @@ final class AppPlayer implements Room.Player {
             dropController();
             key = null;
             phase = IDLE;
-            checkMode();
-        } else if (newRoom) {
-            checkMode();
         }
         if (k == null) {
             if (key != null || phase != IDLE) pauseApp();
@@ -432,6 +433,7 @@ final class AppPlayer implements Room.Player {
         }
 
         // PLAYING
+        r.playerProgress(key, pos, md == null ? 0 : md.getLong(MediaMetadata.METADATA_KEY_DURATION));
         String nowId = md == null ? null : idOf(md);
         boolean movedOn = nowId != null && trackId != null && !nowId.equals(trackId);
         boolean nearEnd = duration > 0 && pos >= duration - 900;

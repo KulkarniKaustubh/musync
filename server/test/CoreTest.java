@@ -105,49 +105,76 @@ public class CoreTest {
 
         // Whole-song playback through a device player.
         final java.util.List<String> calls = new java.util.ArrayList<String>();
+        final java.util.Set<String> can = new java.util.HashSet<String>();
         Room.Player fake = new Room.Player() {
             public void apply(Room room, String key, Map<String, Object> song, boolean paused, String app, boolean force) {
                 calls.add((key == null ? "silence" : Json.str(song.get("title"))) + "/" + (paused ? "paused" : "playing") + "/" + app + (force ? "/force" : ""));
             }
+            public void seek(Room room, String key, long ms) { calls.add("seek/" + ms); }
+            public String check(String app) { return can.contains(app) ? "ok" : "no-access"; }
         };
         Room f = new Room("FULL");
-        String owner = f.join("owner-token-0123456789", "Kau", "spotify");
-        f.join("friend-token-0123456789", "Dev", "tidal");
+        String owner = f.join("owner-token-0123456789", "Kau", "ytm");
+        f.join("friend-token-0123456789", "Dev", "soundcloud");
         f.setPlayer(fake, owner);
         List<Map<String, Object>> list = new Catalog.Sample().search("e", "apple", "US").songs;
         f.add("friend-token-0123456789", list.get(0));
         check("without access the room waits for setup instead of playing previews", "setup".equals(Json.obj(f.state().get("playback")).get("mode")));
+        check("the reason is reported", "no-access".equals(Json.obj(f.state().get("playback")).get("status")));
         check("while waiting the player is told to stay silent", calls.size() > 0 && calls.get(calls.size() - 1).startsWith("silence"));
         String waitKey = Json.str(Json.obj(f.state().get("now")).get("key"));
         f.ended("owner-token-0123456789", waitKey);
         f.tick();
         check("while waiting the song is held at the start",
             waitKey.equals(Json.str(Json.obj(f.state().get("now")).get("key"))) && Json.num(Json.obj(f.state().get("now")).get("position")) == 0);
-        f.playerMode(true, "ok", "");
+        can.add("ytm");
+        f.playerRecheck();
         check("once the device is ready the room switches to whole songs", "full".equals(Json.obj(f.state().get("playback")).get("mode")));
-        check("the player is asked to play the current song in the host's app", calls.get(calls.size() - 1).equals(list.get(0).get("title") + "/playing/spotify"));
+        check("a friend's service the phone cannot play falls back to the host's", calls.get(calls.size() - 1).equals(list.get(0).get("title") + "/playing/ytm"));
+        check("the room lists what the phone can play", "[ytm]".equals(Json.obj(f.state().get("playback")).get("services").toString()));
         check("a whole song is not cut at 30 seconds", Json.num(Json.obj(f.state().get("now")).get("duration")) > 60000);
         String k = Json.str(Json.obj(f.state().get("now")).get("key"));
+        Thread.sleep(30);
+        check("the clock does not run before the song is audible",
+            Json.num(Json.obj(f.state().get("now")).get("position")) == 0 && Boolean.FALSE.equals(Json.obj(f.state().get("now")).get("started")));
+        f.seek("owner-token-0123456789", 50000);
+        check("a song cannot be moved before it has started", Json.num(Json.obj(f.state().get("now")).get("position")) == 0);
         f.playerStarted(k, 201000);
         check("the real length from the music app is used", Json.num(Json.obj(f.state().get("now")).get("duration")) == 201000);
+        check("the clock runs once the song has started", Boolean.TRUE.equals(Json.obj(f.state().get("now")).get("started")));
+        f.seek("owner-token-0123456789", 60000);
+        long at = Json.num(Json.obj(f.state().get("now")).get("position"));
+        check("the host can move through the song", at >= 60000 && at < 61000 && calls.get(calls.size() - 1).equals("seek/60000"));
+        boolean refused = false;
+        try { f.seek("friend-token-0123456789", 1000); } catch (Room.Denied e) { refused = true; }
+        check("a guest cannot move through the song", refused);
+        f.playerProgress(k, 90000, 201000);
+        at = Json.num(Json.obj(f.state().get("now")).get("position"));
+        check("the clock follows the player when it has drifted", at >= 90000 && at < 91000);
         int n = calls.size();
         f.bump("friend-token-0123456789", "nothing");
-        f.add("owner-token-0123456789", list.get(1));
+        can.add("soundcloud");
+        f.playerRecheck();
+        f.add("friend-token-0123456789", list.get(1));
+        f.add("owner-token-0123456789", list.get(2), "soundcloud");
         check("queue changes do not restart the song", calls.size() == n);
+        List<Object> q = Json.arr(f.state().get("queue"));
+        check("each queued song says where it will play",
+            "soundcloud".equals(Json.obj(q.get(0)).get("app")) && "soundcloud".equals(Json.obj(q.get(1)).get("app")));
         f.setPaused("owner-token-0123456789", true);
-        check("pause reaches the player", calls.get(calls.size() - 1).endsWith("/paused/spotify"));
+        check("pause reaches the player", calls.get(calls.size() - 1).endsWith("/paused/ytm"));
         f.setPaused("owner-token-0123456789", false);
         f.ended("owner-token-0123456789", k);
         check("the browser cannot end a whole song early", k.equals(Json.str(Json.obj(f.state().get("now")).get("key"))));
         f.playerEnded(k);
-        check("when the app finishes a song the next one is sent to it", calls.get(calls.size() - 1).equals(list.get(1).get("title") + "/playing/spotify"));
-        f.setApp("owner-token-0123456789", "ytm");
-        check("changing the host's app moves playback to it", calls.get(calls.size() - 1).endsWith("/playing/ytm"));
+        check("the next song plays in the service its adder uses", calls.get(calls.size() - 1).equals(list.get(1).get("title") + "/playing/soundcloud"));
         f.retry("owner-token-0123456789");
         check("retry starts the song again", calls.get(calls.size() - 1).endsWith("/force"));
         f.playerEnded(Json.str(Json.obj(f.state().get("now")).get("key")));
+        check("a host can add a song for another service", calls.get(calls.size() - 1).equals(list.get(2).get("title") + "/playing/soundcloud"));
+        f.playerEnded(Json.str(Json.obj(f.state().get("now")).get("key")));
         check("an empty queue silences the player", calls.get(calls.size() - 1).startsWith("silence"));
-        f.add("friend-token-0123456789", list.get(2));
+        f.add("friend-token-0123456789", list.get(3));
         f.leave("owner-token-0123456789");
         check("if the phone's owner stops being host, their app stops and the room returns to previews",
             calls.get(calls.size() - 1).startsWith("silence") && "preview".equals(Json.obj(f.state().get("playback")).get("mode")));

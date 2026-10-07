@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>musync: SoundCloud player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #101011; color: #B3B3B8; font: 16px/1.5 system-ui, sans-serif; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; }
+  p { margin: 0; padding: 24px; }
+</style>
+</head>
+<body>
+<!--
+  The musync app keeps this page out of sight and loads it once per song:
+  players/soundcloud.html?track=/artist/track
+  It plays that track in SoundCloud's own embeddable player and keeps a small
+  record of what the player is doing (window.__mp) for the app to read.
+-->
+<iframe id="widget" allow="autoplay; encrypted-media" title="SoundCloud player"></iframe>
+<p id="note" hidden></p>
+<script src="https://w.soundcloud.com/player/api.js"></script>
+<script>
+(function () {
+  var mp = window.__mp = { url: '', ready: false, t: 0, d: 0, paused: true, ended: false, error: '' };
+  var frame = document.getElementById('widget'), note = document.getElementById('note'), widget = null;
+  function fail(text) { mp.error = text; note.textContent = text; note.hidden = false; frame.hidden = true; }
+
+  var path = '';
+  try { path = new URLSearchParams(location.search).get('track') || ''; } catch (e) { path = ''; }
+  if (!/^\/[^\/?#\s]+\/[^\/?#\s]+$/.test(path)) return fail('No track was given to play.');
+  if (!window.SC || !SC.Widget) return fail('SoundCloud’s player did not load. Check the connection.');
+
+  mp.url = path;
+  frame.src = 'https://w.soundcloud.com/player/?url=' + encodeURIComponent('https://soundcloud.com' + path)
+    + '&auto_play=true&hide_related=true&show_comments=false&show_teaser=false&visual=true';
+  widget = SC.Widget(frame);
+  var E = SC.Widget.Events;
+  function length() { widget.getDuration(function (d) { if (d > 0) mp.d = Math.round(d); }); }
+  widget.bind(E.READY, function () { mp.ready = true; length(); widget.play(); });
+  widget.bind(E.PLAY, function () { mp.paused = false; mp.ended = false; length(); });
+  widget.bind(E.PAUSE, function () { mp.paused = true; });
+  widget.bind(E.FINISH, function () { mp.ended = true; mp.paused = true; });
+  widget.bind(E.PLAY_PROGRESS, function (e) { mp.t = Math.round(e.currentPosition); if (!mp.d) length(); });
+  widget.bind(E.SEEK, function (e) { mp.t = Math.round(e.currentPosition); });
+  widget.bind(E.ERROR, function () { mp.error = 'SoundCloud could not play this track.'; });
+
+  window.__mp_cmd = function (what, ms) {
+    if (!widget) return;
+    if (what === 'pause') widget.pause();
+    else if (what === 'play') widget.play();
+    else if (what === 'seek') { widget.seekTo(ms); mp.t = ms; }
+  };
+})();
+</script>
+</body>
+</html>

@@ -15,13 +15,24 @@ One shared music queue that everyone in the room adds to from their own phone.
   Tidal, Amazon Music, Deezer or SoundCloud), from the host's own account, and
   moves to the next song when it ends. Pause and skip in musync control that
   app. See "Whole songs" below for the one-time setup.
-- **YouTube Music plays inside musync (experimental, 0.4.0).** When the host
-  picks YouTube Music, the app loads YouTube Music's website in a hidden web
-  view, finds each song there by title and artist, plays it, and moves on when
-  it ends. No other app opens and no permission is needed. "Open YouTube Music
-  to sign in" shows that web view. This drives someone else's website by
-  script: it is against YouTube's terms, fine only for private use, and will
-  break when the site changes. Not yet confirmed on a phone.
+- **YouTube Music and SoundCloud play inside musync (0.5.0).** For these two
+  the app loads the service's own web player in a hidden web view, finds each
+  song by title and artist, plays it, and moves on when it ends. No other app
+  opens and no permission is needed. YouTube Music can be signed in to from
+  the room screen; SoundCloud needs no account. YouTube Music is confirmed on
+  a phone; SoundCloud is not yet. This drives other companies' websites by
+  script: it is against their terms, fine only for private use, and will break
+  when a site changes.
+- **Each song plays in its picker's service.** A song plays in the service the
+  person who added it uses, when the host's phone can play that service;
+  otherwise in the host's. When the phone can play more than one, the search
+  sheet asks which. The room sheet lists what the phone plays.
+- **The clock follows the music.** A song's timer starts when the player
+  reports it is audible and is corrected if playback drifts. The host can drag
+  through the song.
+- **Keeps playing when minimised.** While hosting, the app shows a "room is
+  open" notification and keeps the room and the music going in the
+  background. Not yet confirmed on a phone.
 - **Your own app.** Each person picks the music app they use. Guests get
   "Open in Spotify" (or their app) to hear a song on their own phone.
 - **No previews on the phone app.** Until the host allows access, the song
@@ -117,7 +128,9 @@ node test/rooms.e2e.mjs        # needs Playwright; drives a host and two guests
 ```
 
 `test/lan.e2e.mjs` (joining over Wi-Fi) and `test/full.e2e.mjs` (whole songs)
-list the servers they need at the top of each file.
+list the servers they need at the top of each file. `test/players.e2e.mjs`
+checks the scripts that read the services' web players, against stand-in
+pages: `node test/players.e2e.mjs ../web/players http://localhost:8801/`.
 
 ## What is where
 

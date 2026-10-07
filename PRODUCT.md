@@ -60,24 +60,26 @@ Confirmed:
 Terminology: room, room code, queue, add, bump (move a song up), pick
 ("Maya's pick").
 
-Built in version 0.3 (see README for what is tested):
+Built in version 0.5 (see README for what is tested):
 
 - The host's phone runs the room and serves it to everyone on the same Wi-Fi.
   A standalone server covers people who are apart.
-- Search comes from Apple's and Deezer's public catalogs.
-- The host's phone is the speaker. It plays whole songs by driving the host's
-  own music app through Android's media controls, from the host's account.
-  Until that is set up the song waits; the phone app never plays previews.
-  Previews exist only for rooms hosted from a browser.
-- Guests open a song in their own app to hear it on their own phone.
-- Anyone can add and bump; the host can pause, skip and remove any song; a
-  person can skip or remove their own. These rules were chosen to get a working
-  version and are open to change.
+- Search comes from Apple's and Deezer's public catalogs and names no service.
+- The host's phone is the speaker and plays whole songs. YouTube Music and
+  SoundCloud play in web players built into the app; other services play by
+  driving the app installed on the phone. The phone app never plays previews.
+- A song plays in the service its picker uses when the host's phone can play
+  it, otherwise in the host's. All songs in one service play from the one
+  account signed in on the host's phone.
+- The host can pause, skip, and move through the song. Anyone can add and
+  bump; a person can skip or remove their own. These rules were chosen to get
+  a working version and are open to change.
 
 Still undecided:
 
 - "A song plays from the account of the person who added it" is not built.
-  Today every song plays from the host's account. Playing from each adder's
+  Today a song plays in its picker's service, from whichever account is
+  signed in to that service on the host's phone. Playing from each adder's
   account means that person's phone must be the speaker, or each service must
   approve in-app playback. Research on 2026-10-06 found that only Apple Music
   and YouTube currently offer third-party playback that a new app can use;

@@ -1,44 +1,71 @@
 package app.musync.android;
 
+import android.content.Context;
+
 import app.musync.core.Room;
 
 import java.util.Map;
 
 /**
- * Sends each song to the right player for the host's chosen music app:
- * the built-in web player where musync has one, otherwise the app installed
- * on the phone.
+ * Sends each song to the right player on the host's phone: the built-in web
+ * player for the services musync has one for, otherwise the music app
+ * installed on the phone.
  */
 final class HostPlayer implements Room.Player {
     final AppPlayer apps;
-    final WebPlayer web;
-    private String current = "";
+    final WebPlayer[] web;
+    private final Context ctx;
+    private Room.Player current;
+    private volatile Room room;
 
-    HostPlayer(AppPlayer apps, WebPlayer web) {
-        this.apps = apps;
-        this.web = web;
+    HostPlayer(Context ctx) {
+        this.ctx = ctx.getApplicationContext();
+        apps = new AppPlayer(ctx);
+        web = new WebPlayer[] {
+            new WebPlayer(ctx, WebPlayer.YOUTUBE_MUSIC),
+            new WebPlayer(ctx, WebPlayer.SOUNDCLOUD),
+        };
     }
 
-    static boolean usesWeb(String app) {
-        return WebPlayer.APP.equals(app);
+    /** The built-in web player for a music app, or null when songs go to the installed app. */
+    WebPlayer webFor(String app) {
+        for (WebPlayer w : web) if (w.site.id.equals(app)) return w;
+        return null;
+    }
+
+    private Room.Player playerFor(String app) {
+        WebPlayer w = webFor(app);
+        return w != null ? w : apps;
     }
 
     @Override
-    public synchronized void apply(Room room, String key, Map<String, Object> song, boolean paused, String app, boolean force) {
-        if (app == null) app = "";
-        boolean toWeb = usesWeb(app);
-        if (!app.equals(current)) {
-            // The host changed music apps: silence whichever player had the room.
-            if (toWeb && !usesWeb(current)) apps.stop();
-            if (!toWeb && usesWeb(current)) web.stop();
-            current = app;
-        }
-        if (toWeb) web.apply(room, key, song, paused, app, force);
-        else apps.apply(room, key, song, paused, app, force);
+    public String check(String app) {
+        return playerFor(app).check(app);
     }
 
-    /** Called when musync comes back on screen: the user may have just granted access. */
-    synchronized void recheck() {
-        if (!usesWeb(current)) apps.recheck();
+    @Override
+    public synchronized void seek(Room r, String key, long ms) {
+        if (current != null) current.seek(r, key, ms);
+    }
+
+    @Override
+    public synchronized void apply(Room r, String key, Map<String, Object> song, boolean paused, String app, boolean force) {
+        room = r;
+        Room.Player next = playerFor(app == null ? "" : app);
+        if (current != null && current != next) {
+            // The next song belongs to a different player: silence the one that had the room.
+            if (current == apps) apps.stop(); else ((WebPlayer) current).stop();
+        }
+        current = next;
+        next.apply(r, key, song, paused, app, force);
+        PlaybackService.describe(ctx, key == null ? null : song);
+    }
+
+    /** What this phone can play may have changed (access granted, signed in): have the room ask again. */
+    void recheck() {
+        Room r = room;
+        if (r != null) {
+            try { r.playerRecheck(); } catch (RuntimeException ignored) { }
+        }
     }
 }

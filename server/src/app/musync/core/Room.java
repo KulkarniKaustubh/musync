@@ -41,11 +41,26 @@ public final class Room {
          *
          * @param key   the entry to play, or null for silence
          * @param song  that entry's song data, or null
-         * @param app   the host's music app id ("spotify", "apple", ...)
+         * @param app   the music app to play it in ("spotify", "ytm", ...): the one the
+         *              person who added it asked for when this device can play it,
+         *              otherwise the host's own
          * @param force true to start the song again even if it is the current one
          */
         void apply(Room room, String key, Map<String, Object> song, boolean paused, String app, boolean force);
+
+        /** Moves the current song to this position, in milliseconds. Must return at once. */
+        void seek(Room room, String key, long ms);
+
+        /**
+         * Whether this device can play songs in the given music app right now:
+         * "ok", "no-access" (the person has to allow it first) or "no-app".
+         * Must be quick; the room remembers the answer until {@link Room#playerRecheck()}.
+         */
+        String check(String app);
     }
+
+    /** Every music app a person can pick. */
+    private static final String[] APPS = {"spotify", "apple", "ytm", "tidal", "amazon", "deezer", "soundcloud"};
 
     public static final class Denied extends Exception {
         public Denied(String message) { super(message); }
@@ -61,6 +76,8 @@ public final class Room {
         String key;
         Map<String, Object> song;
         String by;
+        String app;   // the music app the person who added it wants it played in
+        String via;   // once it has started: the app it is actually playing in
         long seq;
         final Set<String> bumps = new HashSet<String>();
     }
@@ -95,7 +112,8 @@ public final class Room {
     private long durationMs = DEFAULT_MS;
     private Player player;
     private String playerOwner;          // the person whose device the player runs on
-    private boolean playerReady;         // that device can play whole songs right now
+    private final Map<String, String> checks = new LinkedHashMap<String, String>(); // remembered Player.check answers
+    private boolean started;             // the device player has confirmed the current song is audible
     private String playerStatus = "";    // short machine word: ok, starting, needs-open, failed, no-access, no-app
     private String playerDetail = "";    // one plain sentence for people
     private String lastApplied = "";
@@ -155,11 +173,18 @@ public final class Room {
     // ---------- actions ----------
 
     public synchronized void setApp(String token, String app) throws Denied {
+        boolean was = full();
         member(token).app = clean(app, 24);
+        modeMayHaveChanged(was);
         changed();
     }
 
     public synchronized void add(String token, Map<String, Object> song) throws Denied {
+        add(token, song, null);
+    }
+
+    /** @param app the music app to play it in, or null for the person's own */
+    public synchronized void add(String token, Map<String, Object> song, String app) throws Denied {
         Member m = member(token);
         if (song == null) throw new Denied("That song is no longer available. Search for it again.");
         String ref = (String) song.get("ref");
@@ -171,6 +196,8 @@ public final class Room {
         e.seq = seq;
         e.song = song;
         e.by = m.id;
+        app = clean(app, 24);
+        e.app = app.length() > 0 ? app : m.app;
         if (now == null) start(e); else queue.add(e);
         changed();
     }
@@ -205,7 +232,7 @@ public final class Room {
         if (!m.id.equals(hostId)) throw new Denied("Only the host can pause the room.");
         if (now == null || paused == pause) return;
         long t = System.currentTimeMillis();
-        if (pause) pausedAtMs = Math.min(durationMs, t - startedAt);
+        if (pause) pausedAtMs = device() && !started ? 0 : Math.min(durationMs, t - startedAt);
         else startedAt = t - pausedAtMs;
         paused = pause;
         changed();
@@ -217,24 +244,49 @@ public final class Room {
     public synchronized void setPlayer(Player p, String ownerId) {
         player = p;
         playerOwner = ownerId;
+        checks.clear();
         changed();
     }
 
-    /** True when whole songs play on the host's device rather than previews in the browser. */
-    private boolean full() {
-        return player != null && playerReady && hostId != null && hostId.equals(playerOwner);
-    }
-
-    public synchronized boolean isFull() { return full(); }
-
-    /** The host's phone can play whole songs, so the room never falls back to 30-second previews. */
+    /** The host's phone is the room's player, so the room never falls back to 30-second previews. */
     private boolean device() {
         return player != null && hostId != null && hostId.equals(playerOwner);
     }
 
-    /** The host's phone is the player but is not set up yet: the song waits instead of playing a preview. */
+    /** Asks the device player about a music app, remembering the answer. */
+    private String check(String app) {
+        if (app == null || app.length() == 0) return "no-app";
+        String known = checks.get(app);
+        if (known != null) return known;
+        String answer;
+        try {
+            answer = player.check(app);
+        } catch (RuntimeException e) {
+            answer = null;
+        }
+        if (answer == null) answer = "no-app";
+        checks.put(app, answer);
+        return answer;
+    }
+
+    /** True when whole songs play on the host's device rather than previews in the browser. */
+    private boolean full() {
+        return device() && "ok".equals(check(hostApp()));
+    }
+
+    public synchronized boolean isFull() { return full(); }
+
+    /** The host's phone is the player but the host's own music app is not usable yet: the song waits. */
     private boolean waiting() {
-        return device() && !playerReady;
+        return device() && !full();
+    }
+
+    /** Where a song plays: in the app its adder asked for when this device can, otherwise the host's. */
+    private String target(Entry e) {
+        // A song that has started stays where it is; changing apps mid-song would restart it.
+        if (device() && e.via != null && "ok".equals(check(e.via))) return e.via;
+        if (device() && e.app != null && e.app.length() > 0 && "ok".equals(check(e.app))) return e.app;
+        return hostApp();
     }
 
     public synchronized String hostApp() {
@@ -242,20 +294,28 @@ public final class Room {
         return "";
     }
 
-    /** The device player says whether it can play whole songs, and why not if it cannot. */
-    public synchronized void playerMode(boolean ready, String status, String detail) {
+    /**
+     * The device player says what it can play may have changed, for example the
+     * person has just allowed access or signed in. The room asks again.
+     */
+    public synchronized void playerRecheck() {
         boolean was = full();
-        playerReady = ready;
-        playerStatus = status == null ? "" : status;
-        playerDetail = detail == null ? "" : detail;
-        if (full() != was && now != null) {
-            // Switching between previews and whole songs: the current song starts over.
-            durationMs = device() ? fullLength(now) : DEFAULT_MS;
-            startedAt = System.currentTimeMillis();
-            pausedAtMs = 0;
-            paused = false;
-        }
+        checks.clear();
+        modeMayHaveChanged(was);
         changed();
+    }
+
+    /** Switching between waiting, previews and whole songs: the current song starts over. */
+    private void modeMayHaveChanged(boolean was) {
+        if (full() == was || now == null) return;
+        durationMs = device() ? fullLength(now) : DEFAULT_MS;
+        startedAt = System.currentTimeMillis();
+        pausedAtMs = 0;
+        paused = false;
+        started = !device();
+        if (device()) { playerStatus = ""; playerDetail = ""; }
+        now.via = null;
+        now.via = target(now);
     }
 
     public synchronized void playerStatus(String status, String detail) {
@@ -266,12 +326,46 @@ public final class Room {
         changed();
     }
 
-    /** The device player started the song and knows its real length. The clock restarts from here. */
+    /** The device player started the song and knows its real length. The clock starts here, not before. */
     public synchronized void playerStarted(String key, long ms) {
         if (!full() || now == null || !now.key.equals(key)) return;
-        if (ms >= 5000 && ms <= 3600000) durationMs = ms;
+        if (ms >= 5000 && ms <= 3 * 3600000L) durationMs = ms;
+        started = true;
         startedAt = System.currentTimeMillis();
         pausedAtMs = 0;
+        changed();
+    }
+
+    /**
+     * The device player says where the song really is. The room's clock is
+     * corrected when it has drifted, for example after buffering or an ad.
+     */
+    public synchronized void playerProgress(String key, long positionMs, long lengthMs) {
+        if (!full() || now == null || !now.key.equals(key) || !started) return;
+        boolean moved = false;
+        if (lengthMs >= 5000 && lengthMs <= 3 * 3600000L && Math.abs(lengthMs - durationMs) > 1500) {
+            durationMs = lengthMs;
+            moved = true;
+        }
+        long t = System.currentTimeMillis();
+        long expected = paused ? pausedAtMs : t - startedAt;
+        if (positionMs >= 0 && Math.abs(expected - positionMs) > 1500) {
+            if (paused) pausedAtMs = positionMs; else startedAt = t - positionMs;
+            moved = true;
+        }
+        if (moved) changed();
+    }
+
+    /** The host drags the song to a new position. */
+    public synchronized void seek(String token, long ms) throws Denied {
+        Member m = member(token);
+        if (!m.id.equals(hostId)) throw new Denied("Only the host can move through the song.");
+        if (now == null || waiting() || (device() && !started)) return;
+        ms = Math.max(0, Math.min(ms, Math.max(0, durationMs - 1500)));
+        if (paused) pausedAtMs = ms; else startedAt = System.currentTimeMillis() - ms;
+        if (full()) {
+            try { player.seek(this, now.key, ms); } catch (RuntimeException ignored) { }
+        }
         changed();
     }
 
@@ -286,6 +380,9 @@ public final class Room {
         Member m = member(token);
         if (!m.id.equals(hostId)) throw new Denied("Only the host can restart playback.");
         if (player != null && full()) {
+            started = false;
+            startedAt = System.currentTimeMillis();
+            pausedAtMs = 0;
             lastApplied = "";
             notifyPlayer(true);
         }
@@ -300,7 +397,7 @@ public final class Room {
     private void notifyPlayer(boolean force) {
         if (player == null) return;
         boolean on = full();
-        String app = hostApp();
+        String app = now == null ? hostApp() : target(now);
         String sig = on + "|" + (now == null ? "-" : now.key) + "|" + paused + "|" + app;
         if (!force && sig.equals(lastApplied)) return;
         lastApplied = sig;
@@ -345,6 +442,11 @@ public final class Room {
     /** Called about once a second: moves on when a song has run its length and nobody reported the end. */
     public synchronized void tick() {
         if (now == null || paused || waiting()) return;
+        if (device() && !started) {
+            // A song that will not start does not hold the queue up for ever.
+            if (System.currentTimeMillis() - startedAt > 90000 && !queue.isEmpty()) { next(); changed(); }
+            return;
+        }
         // With a device player the end normally comes from it; this is the safety net.
         long grace = full() ? 20000 : 2500;
         if (System.currentTimeMillis() - startedAt > durationMs + grace) {
@@ -359,6 +461,10 @@ public final class Room {
         durationMs = device() ? fullLength(e) : DEFAULT_MS;
         startedAt = System.currentTimeMillis();
         pausedAtMs = 0;
+        started = !device();
+        if (device()) { playerStatus = ""; playerDetail = ""; }
+        e.via = null;
+        e.via = target(e);
     }
 
     private void next() {
@@ -403,19 +509,28 @@ public final class Room {
         if (now != null) {
             Map<String, Object> n = entry(now);
             n.put("paused", paused);
-            n.put("position", waiting() ? 0 : paused ? pausedAtMs : Math.max(0, Math.min(durationMs, t - startedAt)));
+            boolean running = !waiting() && started;
+            n.put("position", !running ? 0 : paused ? pausedAtMs : Math.max(0, Math.min(durationMs, t - startedAt)));
             n.put("duration", durationMs);
+            n.put("started", running);
             playing = n;
         }
+        // While the host's own app is not usable, the status says why; otherwise it is the player's own report.
+        String status = playerStatus, detail = playerDetail;
+        List<Object> services = new ArrayList<Object>();
+        if (device()) {
+            if (!full()) { status = check(hostApp()); detail = ""; }
+            for (String a : APPS) if ("ok".equals(check(a))) services.add(a);
+        }
         Map<String, Object> playback = Json.map("mode", full() ? "full" : device() ? "setup" : "preview", "app", hostApp(),
-                "device", device(),
-                "status", playerStatus, "detail", playerDetail);
+                "device", device(), "services", services,
+                "status", status, "detail", detail);
         return Json.map("code", code, "hostId", hostId, "people", people, "now", playing, "queue", q,
                 "playback", playback, "serverTime", t);
     }
 
     private Map<String, Object> entry(Entry e) {
-        return Json.map("key", e.key, "song", e.song, "by", e.by, "bumps", new ArrayList<Object>(e.bumps));
+        return Json.map("key", e.key, "song", e.song, "by", e.by, "app", target(e), "bumps", new ArrayList<Object>(e.bumps));
     }
 
     /** Opens a live connection for this person. The first message is the current state. */

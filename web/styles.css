@@ -296,7 +296,42 @@ svg { display: block; }
 .progress { display: grid; gap: 6px; }
 .progress-track { height: 4px; border-radius: 999px; background: var(--layer-2); overflow: hidden; }
 .progress-fill { height: 100%; background: var(--text); transform-origin: left center; transform: scaleX(0); transition: transform 1s linear; }
-.progress-times { display: flex; justify-content: space-between; color: var(--text-3); font-size: var(--t-xs); }
+.progress-times { display: flex; justify-content: space-between; min-height: 1.4em; color: var(--text-3); font-size: var(--t-xs); }
+.progress-bar { position: relative; display: grid; align-items: center; }
+
+/* The host's handle for moving through the song. The visible track stays 4px;
+   the control over it is 28px tall so a thumb can find it. */
+.progress.has-scrub .progress-bar { height: 28px; margin: -12px 0; }
+.progress.has-scrub .progress-fill { transition-duration: .5s; }
+.scrub {
+  --thumb: 16px;
+  position: absolute; top: 0; left: calc(var(--thumb) / -2); width: calc(100% + var(--thumb)); height: 100%;
+  margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: pan-y;
+  -webkit-appearance: none; appearance: none; outline: none;
+}
+.scrub::-webkit-slider-runnable-track { height: 28px; background: transparent; }
+.scrub::-moz-range-track { height: 28px; background: transparent; }
+.scrub::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: var(--thumb); height: var(--thumb); margin-top: 6px;
+  border: 0; border-radius: 50%; background: var(--text); box-shadow: 0 1px 4px rgb(0 0 0 / .45);
+  transition: transform .15s var(--ease);
+}
+.scrub::-moz-range-thumb {
+  width: var(--thumb); height: var(--thumb); border: 0; border-radius: 50%; background: var(--text);
+  box-shadow: 0 1px 4px rgb(0 0 0 / .45); transition: transform .15s var(--ease);
+}
+.scrub:active::-webkit-slider-thumb { transform: scale(1.3); }
+.scrub:active::-moz-range-thumb { transform: scale(1.3); }
+.scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+.scrub:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+
+/* A song that has been asked for but is not audible yet: the bar moves without claiming a position. */
+.progress.is-starting .progress-track { position: relative; }
+.progress.is-starting .progress-track::after {
+  content: ""; position: absolute; inset: 0; width: 35%; border-radius: inherit;
+  background: var(--text-2); animation: starting 1.3s var(--ease) infinite;
+}
+@keyframes starting { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 .now .progress-times { color: var(--text-2); }
 .now .progress-track { background: var(--layer-2); background: color-mix(in oklab, var(--text) 16%, transparent); }
 .now-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -468,6 +503,10 @@ svg { display: block; }
 #service-form { display: grid; gap: 16px; }
 .btn-danger-text { color: var(--danger); }
 .invite-help { color: var(--text-2); font-size: var(--t-sm); }
+.service { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 56px; padding: 4px 0; }
+.service-name { display: block; font-weight: 700; }
+.service-state { display: block; color: var(--text-2); font-size: var(--t-sm); }
+.chips-label { flex: none; align-self: center; color: var(--text-2); font-size: var(--t-sm); font-weight: 600; }
 .invite-link { color: var(--text); font-weight: 700; overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
 .sheet-section .notice { display: grid; gap: 8px; justify-items: start; background: var(--layer-2); font-weight: 400; }
 .sheet-section .notice b { font-size: var(--t-base); font-weight: 800; }

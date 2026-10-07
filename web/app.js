@@ -48,6 +48,7 @@
     room: saved.room || '',      // the room to come back to after a reload
     home: saved.home || '',      // where "leave" returns to when this page is another phone's server
     address: saved.address || '', // this phone's Wi-Fi address, typed in by hand when it cannot be detected
+    skipSignIn: Array.isArray(saved.skipSignIn) ? saved.skipSignIn : [], // services the host chose not to sign in to
   };
   const persist = () => store.write(device);
   persist();
@@ -65,6 +66,8 @@
     listening: false,            // non-hosts can choose to hear the previews too
     needsTap: false,             // the browser wants a tap before it will play sound
     scope: 'all',
+    playIn: '',                  // when adding: which of the host phone's services the song should play in
+    scrubbing: false,            // the host is dragging through the song
     search: { q: '', loading: false, songs: [], failed: [], error: '' },
     adding: new Set(),
     justAdded: null,
@@ -89,6 +92,12 @@
   const native = () => window.MusyncNative || null;
   // On the host's phone some music apps play in a web player built into musync
   // ("web"); the rest are driven as installed apps ("app").
+  const webSignedIn = (appId) => {
+    const n = native();
+    try { return n && n.webSignedIn ? n.webSignedIn(appId) : 'none'; } catch (_) { return 'none'; }
+  };
+  /** The music apps the host's phone can play right now. Empty when the room is not hosted from the phone app. */
+  const services = () => playback().services || [];
   const playerKind = (appId) => {
     const n = native();
     try { return n && n.playerKind ? n.playerKind(appId) : 'app'; } catch (_) { return 'app'; }
@@ -357,8 +366,8 @@
         </div>
         <ol class="steps">
           <li><span><b>Start or join a room</b>${ui.info.lan ? 'Everyone on the same Wi-Fi can join. No account needed.' : 'No account needed. A room is just a code.'}</span></li>
-          <li><span><b>Search and add songs</b>Real songs from Apple Music’s and Deezer’s catalogs.</span></li>
-          <li><span><b>Listen together</b>The host’s phone plays each song in the host’s own music app. Without that, the room plays 30-second previews.</span></li>
+          <li><span><b>Search and add songs</b>Everyone adds to the same queue, and bumps the songs they want sooner.</span></li>
+          <li><span><b>Listen together</b>The host’s phone plays each song in full, in the music service the person who picked it uses when the phone has it.</span></li>
         </ol>
       </div>
     </main>`;
@@ -366,7 +375,7 @@
 
   function appOptions(name, selected) {
     return `<div class="options">${APPS.map((s) => `<label class="option${selected === s.id ? ' is-checked' : ''}">
-      <span>${esc(s.name)}</span>
+      <span>${esc(s.name)}${playerKind(s.id) === 'web' ? '<small>Plays inside musync on this phone</small>' : ''}</span>
       <input type="radio" name="${name}" value="${s.id}" ${selected === s.id ? 'checked' : ''}>
       <span class="option-mark">${ICON.check}</span></label>`).join('')}</div>`;
   }
@@ -385,7 +394,7 @@
         </div>
         <fieldset>
           <legend>Your music app</legend>
-          <p class="legend-help">If you host, songs play in this app from your account. You can change it later.</p>
+          <p class="legend-help">${joining ? 'Your songs play in this service when the host’s phone has it.' : 'Songs play in this service on this phone.'} You can change it later.</p>
           ${appOptions('app', device.app)}
           <p class="field-error" id="setup-app-error" role="alert" hidden></p>
         </fieldset>
@@ -449,28 +458,30 @@
   // ---------- live regions ----------
 
   const eq = (on) => `<span class="eq${on ? ' is-on' : ''}" aria-hidden="true"><i></i><i></i><i></i></span>`;
-  function sourceLine(song) {
+  function sourceLine(n) {
     if (setupMode()) {
-      if (isHost()) return 'Waiting for the step below';
+      if (isHost()) return 'Waiting for the step above';
       return `Starts when ${nameOf(ui.room.hostId)} finishes setting up`;
     }
     if (!fullMode()) return '30-second preview';
-    const whose = isHost() ? 'your' : nameOf(ui.room.hostId) + '’s';
+    const where = `${appName(n.app || playback().app)} on ${isHost() ? 'this phone' : nameOf(ui.room.hostId) + '’s phone'}`;
     const st = playback().status;
-    if (st === 'failed' || st === 'needs-open') return `Not playing yet in ${whose} ${appName(playback().app)}`;
-    if (st === 'starting') return `Starting in ${whose} ${appName(playback().app)}`;
-    return `Playing in ${whose} ${appName(playback().app)}`;
+    if (st === 'failed' || st === 'needs-open') return `Couldn’t start in ${where}`;
+    if (!n.started) return `Starting in ${where}`;
+    return `Playing in ${where}`;
   }
 
   /** Anything the host needs to know or do about playback, shown under the song. */
   function playbackNote() {
     const pb = playback();
-    if (!fullMode() || !pb.detail) return '';
+    // While a song is starting, the line under the picker's name already says so.
+    if (!fullMode() || !pb.detail || pb.status === 'starting') return '';
+    const playingIn = (ui.room.now && ui.room.now.app) || pb.app;
     let action = '';
     if (isHost() && native()) {
-      if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app">Open ${esc(appName(pb.app))}</button>`;
+      if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app" data-app="${esc(playingIn)}">Open ${esc(appName(playingIn))}</button>`;
       if (pb.status === 'failed' || pb.status === 'needs-open') action += '<button type="button" class="btn btn-sm" id="retry-play">Try again</button>';
-      if (pb.status === 'failed' && playerKind(pb.app) === 'web') action += `<button type="button" class="btn btn-sm" id="show-web-player">Show ${esc(appName(pb.app))}</button>`;
+      if (pb.status === 'failed' && playerKind(playingIn) === 'web') action += `<button type="button" class="btn btn-sm" data-show-player="${esc(playingIn)}">Show ${esc(appName(playingIn))}</button>`;
     }
     return `<div class="now-note"><p>${esc(pb.detail)}</p>${action ? `<div class="now-actions">${action}</div>` : ''}</div>`;
   }
@@ -498,14 +509,17 @@
       <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open musync’s settings</button></div></div>`;
   }
 
-  /** On the host's phone, when the music plays in the web player built into musync. */
-  function webPlayerCardHTML() {
+  /** On the host's phone: offer to sign in to a service that is playing signed out. Gone once signed in. */
+  function signInCardHTML() {
     const pb = playback();
-    if (!isHost() || !native() || !pb.device || playerKind(pb.app) !== 'web') return '';
-    const app = esc(appName(pb.app));
-    return `<div class="card"><b>${app} plays inside musync</b>
-      <p>Songs play from ${app}’s website, kept out of sight. Sign in there to play from your own account. Keep musync on screen while the room is playing.</p>
-      <div class="now-actions"><button type="button" class="btn btn-sm" id="show-web-player">Open ${app} to sign in</button></div></div>`;
+    if (!isHost() || !native() || !pb.device) return '';
+    const id = services().find((a) => playerKind(a) === 'web' && webSignedIn(a) === 'out' && !device.skipSignIn.includes(a));
+    if (!id) return '';
+    const name = esc(appName(id));
+    return `<div class="card"><b>Sign in to ${name}</b>
+      <p>${name} is playing signed out, so there may be ads. Sign in to play from your own account.</p>
+      <div class="now-actions"><button type="button" class="btn btn-sm btn-primary" data-show-player="${esc(id)}">Sign in</button>
+        <button type="button" class="btn btn-sm" data-skip-signin="${esc(id)}">Not now</button></div></div>`;
   }
 
   function nowHTML() {
@@ -515,7 +529,7 @@
       return `<div class="tv-cover">${cover(n.song, true)}</div>
         <div><p class="tv-label">${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}</p>
           <h1 class="tv-title">${esc(n.song.title)}</h1><p class="tv-artist">${esc(n.song.artist)}</p></div>
-        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second').replace('Playing in', 'playing in').replace('Waiting', 'waiting').replace('Starts', 'starts'))}</span></p>
+        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n).replace(/^(30-second)/, 'a $1').replace(/^[A-Z]/, (c) => c.toLowerCase()))}</span></p>
         ${progressHTML()}`;
     }
     if (!n) return '<div class="empty"><b>Nothing is playing</b>The room starts when someone adds a song.</div>';
@@ -523,7 +537,7 @@
     const app = myApp();
     const actions = [];
     if (ui.needsTap && isPlayer()) actions.push(`<button type="button" class="btn btn-sm btn-primary" id="tap-sound">${ICON.sound}Turn sound on</button>`);
-    if (isHost() && !setupMode()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
+    if (isHost() && running(n)) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
     if (isHost() || mine) actions.push(`<button type="button" class="btn btn-sm" id="skip">${ICON.skip}${mine && !isHost() ? 'Skip my song' : 'Skip'}</button>`);
     if (!isHost() && playback().mode === 'preview') actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
     // The host's phone plays the song itself; sending the host to another app would be a detour.
@@ -531,16 +545,25 @@
     return `<div class="now" style="--tint: hsl(${hueOf(n.song)} 44% 36%)">
       <div class="now-top">${cover(n.song, true)}
         <div><h3 class="now-title">${esc(n.song.title)}</h3><p class="now-artist">${esc(n.song.artist)}</p></div></div>
-      <div class="now-pick">${avatar(n.by)}<div class="now-pick-text"><b>${esc(pickLabel(n.by))}</b><span>${esc(sourceLine(n.song))}</span></div></div>
+      <div class="now-pick">${avatar(n.by)}<div class="now-pick-text"><b>${esc(pickLabel(n.by))}</b><span>${esc(sourceLine(n))}</span></div></div>
       ${progressHTML()}
       ${playbackNote()}
       <div class="now-actions">${actions.join('')}</div>
     </div>`;
   }
 
-  const progressHTML = () => `<div class="progress">
-      <div class="progress-track"><div class="progress-fill" data-fill></div></div>
+  /** The song is audible and its clock is running (not waiting for setup, not still starting). */
+  const running = (n) => !!n && !setupMode() && n.started !== false;
+
+  // The host can drag through the song. Everyone else sees the same bar without the handle.
+  function progressHTML() {
+    const n = ui.room.now, live = running(n);
+    const scrub = live && isHost() && ui.view === 'room'
+      ? `<input class="scrub" type="range" min="0" max="${n.duration}" step="1000" value="0" data-scrub aria-label="Position in the song">` : '';
+    return `<div class="progress${!live && fullMode() ? ' is-starting' : ''}${scrub ? ' has-scrub' : ''}">
+      <div class="progress-bar"><div class="progress-track"><div class="progress-fill" data-fill></div></div>${scrub}</div>
       <div class="progress-times num"><span data-elapsed></span><span data-total></span></div></div>`;
+  }
 
   function rowHTML(e) {
     const n = e.bumps.length, title = esc(e.song.title);
@@ -557,7 +580,7 @@
     }
     return `<li class="row${ui.justAdded === e.song.ref ? ' is-new' : ''}" data-key="${e.key}">${cover(e.song)}
       <div class="row-main"><span class="row-title">${title}</span><span class="row-artist">${esc(e.song.artist)}</span>
-        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b></span></div>
+        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b>${playback().device && e.app ? `<span>${esc(appName(e.app))}</span>` : ''}</span></div>
       ${side}</li>`;
   }
 
@@ -610,18 +633,19 @@
     const refocus = active && app.contains(active)
       ? (active.dataset.bump ? `[data-bump="${active.dataset.bump}"]` : active.id ? '#' + active.id : null) : null;
 
-    slot('now').innerHTML = nowHTML();
+    // While the host is dragging through the song, leave the card alone so the drag is not cut off.
+    if (!ui.scrubbing) slot('now').innerHTML = nowHTML();
     q.innerHTML = queueHTML();
     slot('count').textContent = ui.room.queue.length ? plural(ui.room.queue.length, 'song') : '';
     if (ui.view === 'room') {
       const n = ui.room.now;
-      slot('nowhead').innerHTML = !n ? 'Now playing' : setupMode() ? 'Ready to play' : `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}`;
+      slot('nowhead').innerHTML = !n ? 'Now playing' : setupMode() ? 'Ready to play' : !running(n) ? 'Up now' : `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}`;
       slot('people').innerHTML = peopleBtnHTML();
       slot('roomname').textContent = isHost() ? 'Your room' : nameOf(ui.room.hostId) + '’s room';
       slot('code').textContent = roomCode();
       const card = setupCardHTML();
       if (slot('setup').innerHTML !== card) slot('setup').innerHTML = card;
-      const after = webPlayerCardHTML();
+      const after = signInCardHTML();
       if (slot('after').innerHTML !== after) slot('after').innerHTML = after;
     }
     paintProgress(true);
@@ -644,18 +668,22 @@
   /** Where the song is right now, from the server's clock. */
   function position() {
     const n = ui.room && ui.room.now;
-    if (!n || setupMode()) return 0;
+    if (!running(n)) return 0;
     return Math.min(n.duration, n.paused ? n.position : n.position + (Date.now() - ui.receivedAt));
   }
 
-  function paintProgress(jump) {
+  function paintProgress(jump, at) {
     const n = ui.room && ui.room.now, fill = $('[data-fill]', app);
     if (!n || !fill) return;
-    const pos = position();
-    if (jump) fill.style.transition = 'none';
-    fill.style.transform = 'scaleX(' + Math.min(1, pos / n.duration) + ')';
+    const live = running(n);
+    const pos = at != null ? at : position();
+    if (jump || ui.scrubbing) fill.style.transition = 'none';
+    fill.style.transform = 'scaleX(' + (live ? Math.min(1, pos / n.duration) : 0) + ')';
     if (jump) { void fill.offsetWidth; fill.style.transition = ''; }
-    $('[data-elapsed]', app).textContent = clock(pos);
+    const scrub = $('[data-scrub]', app);
+    if (scrub && !ui.scrubbing) scrub.value = pos;
+    if (scrub) scrub.setAttribute('aria-valuetext', `${clock(pos)} of ${clock(n.duration)}`);
+    $('[data-elapsed]', app).textContent = live ? clock(pos) : '';
     $('[data-total]', app).textContent = clock(n.duration);
   }
   setInterval(() => paintProgress(false), 500);
@@ -756,9 +784,17 @@
   $('.searchbox-icon').innerHTML = ICON.search;
   let searchTimer, searchAbort;
 
-  // Search uses one neutral song index. Which service it comes from does not
-  // matter to the person: the song plays in their room's music app either way.
-  function renderChips() { $('#scope-chips').hidden = true; }
+  // Search uses one neutral song index. When the host's phone can play more than
+  // one service, the person chooses which one their song plays in.
+  function renderChips() {
+    const box = $('#scope-chips'), list = services();
+    if (list.length < 2) { box.hidden = true; box.innerHTML = ''; ui.playIn = ''; return; }
+    if (!list.includes(ui.playIn)) ui.playIn = list.includes(myApp()) ? myApp() : (list.includes(playback().app) ? playback().app : list[0]);
+    box.hidden = false;
+    box.setAttribute('aria-label', 'Which service plays the song');
+    box.innerHTML = '<span class="chips-label">Play in</span>' + list.map((id) =>
+      `<button type="button" class="chip" data-play-in="${esc(id)}" aria-pressed="${ui.playIn === id}">${esc(appName(id))}</button>`).join('');
+  }
 
   function queueSearch(now) {
     const q = input.value.trim();
@@ -800,7 +836,7 @@
     }
     if (s.q.length < 2) {
       results.innerHTML = `<li class="results-note"><b>Find a song</b>Search by song or artist.
-        ${playback().device ? `It plays in full in ${esc(isHost() ? 'your' : nameOf(ui.room.hostId) + '’s')} ${esc(appName(playback().app))}.` : `The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.`}</li>`;
+        ${playback().device ? `It plays in full on ${esc(isHost() ? 'this phone' : nameOf(ui.room.hostId) + '’s phone')}, in ${esc(appName(ui.playIn || playback().app))}.` : `The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.`}</li>`;
       return;
     }
     if (!s.songs.length) {
@@ -842,9 +878,11 @@
     renderResults();
     try {
       const wasEmpty = !ui.room.now;
-      await api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'add', ref });
+      const body = { token: device.token, type: 'add', ref };
+      if (ui.playIn) body.app = ui.playIn;
+      await api(`/api/rooms/${ui.room.code}/act`, body);
       ui.justAdded = ref;
-      toast(wasEmpty && !setupMode() ? 'Playing now' : 'Added to the queue');
+      toast(wasEmpty && !setupMode() ? (ui.playIn ? `Starting in ${appName(ui.playIn)}` : 'Starting now') : 'Added to the queue');
     } catch (e) {
       toast(e.message);
     }
@@ -880,11 +918,27 @@
             <span class="person-app">${esc(appName(p.app))}</span></div>
           ${p.id === ui.me ? '<button type="button" class="btn btn-sm" id="change-app">Change app</button>' : '<span></span>'}</li>`).join('')}</ul>
       </section>
+      ${servicesHTML()}
       <div class="sheet-actions">
         <button type="button" class="btn btn-block" id="open-tv">${ICON.tv}Show on a big screen</button>
         <button type="button" class="btn btn-ghost btn-block btn-danger-text" id="leave-room">${isHost() && ui.room.people.length > 1 ? 'Leave and hand over the room' : 'Leave room'}</button>
       </div>`;
     drawQR($('#invite-qr'));
+  }
+  /** On the host's phone: which services it can play, and signing in to the ones that take an account. */
+  function servicesHTML() {
+    const list = services();
+    if (!isHost() || !native() || !playback().device || !list.length) return '';
+    const rows = list.map((id) => {
+      const web = playerKind(id) === 'web', signed = web ? webSignedIn(id) : 'none';
+      const state = signed === 'in' ? 'Signed in' : signed === 'out' ? 'Playing signed out' : web ? 'No account needed' : 'Plays in the app on this phone';
+      const action = signed === 'out' ? `<button type="button" class="btn btn-sm" data-show-player="${esc(id)}">Sign in</button>`
+        : signed === 'in' ? `<button type="button" class="btn btn-sm" data-show-player="${esc(id)}">Open</button>` : '<span></span>';
+      return `<li class="service"><div><span class="service-name">${esc(appName(id))}</span><span class="service-state">${state}</span></div>${action}</li>`;
+    }).join('');
+    return `<section class="sheet-section" aria-labelledby="svc-h"><h3 id="svc-h">This phone plays</h3>
+      <ul>${rows}</ul>
+      <p class="invite-help">A song plays in the service its picker uses when that service is listed here. Otherwise it plays in ${esc(appName(playback().app))}.</p></section>`;
   }
   function openPeople() {
     renderPeople();
@@ -894,7 +948,7 @@
   }
 
   function openAppPicker() {
-    $('#service-body').innerHTML = `<p class="setup-sub">If you host, songs play in this app. “Open in” also uses it.</p>
+    $('#service-body').innerHTML = `<p class="setup-sub">Your songs play in this service when the host’s phone has it. “Open in” also uses it.</p>
       <form id="service-form">${appOptions('app-pick', myApp())}
       <button type="submit" class="btn btn-primary btn-block">Use this app</button></form>`;
     $('#service-sheet').showModal();
@@ -968,14 +1022,43 @@
 
   // The Android app calls this for the system back button. "1" means the press
   // was used here; "0" lets the app go to the background.
+  // The Android app calls this after the person comes back from a service's web player.
+  window.musyncRefresh = () => { refresh(true); };
+
   window.musyncBack = () => {
     const open = document.querySelector('dialog[open]');
     if (open) { open.close(); return '1'; }
     if (ui.view === 'tv') { go('room'); return '1'; }
     if (ui.view === 'setup') { go('landing'); return '1'; }
-    if (ui.view === 'room') { openPeople(); return '1'; }
-    return '0';
+    return '0'; // from the room, back minimises the app; the room and the music keep going
   };
+
+  // ---------- moving through the song ----------
+
+  const scrubber = (ev) => (ev.target && ev.target.matches && ev.target.matches('[data-scrub]') ? ev.target : null);
+  app.addEventListener('pointerdown', (ev) => { if (scrubber(ev)) ui.scrubbing = true; });
+  app.addEventListener('input', (ev) => {
+    const el = scrubber(ev);
+    if (!el) return;
+    ui.scrubbing = true;
+    paintProgress(false, Number(el.value) || 0);
+  });
+  app.addEventListener('change', (ev) => {
+    const el = scrubber(ev);
+    if (!el) return;
+    const ms = Number(el.value) || 0, n = ui.room && ui.room.now;
+    ui.scrubbing = false;
+    if (!n) return;
+    // Show the new position at once; the room confirms it a moment later.
+    n.position = ms;
+    ui.receivedAt = Date.now();
+    paintProgress(true);
+    act('seek', { ms }).catch((e) => toast(e.message));
+  });
+  // A press that never moved sends no change; let the card update again.
+  document.addEventListener('pointerup', () => {
+    if (ui.scrubbing) setTimeout(() => { if (ui.scrubbing) { ui.scrubbing = false; refresh(true); } }, 300);
+  });
 
   // ---------- events ----------
 
@@ -1006,9 +1089,15 @@
     }
     if (t.id === 'tap-sound') { ui.needsTap = false; player.play().catch(() => {}); syncPlayer(); return refresh(true); }
     if (t.id === 'grant-access') return native() && native().requestMediaAccess();
-    if (t.id === 'show-web-player') return native() && native().showWebPlayer && native().showWebPlayer();
+    if (d.showPlayer) return native() && native().showWebPlayer && native().showWebPlayer(d.showPlayer);
+    if (d.skipSignin) {
+      if (!device.skipSignIn.includes(d.skipSignin)) device.skipSignIn.push(d.skipSignin);
+      persist();
+      return refresh(true);
+    }
+    if (d.playIn) { ui.playIn = d.playIn; renderChips(); return renderResults(); }
     if (t.id === 'open-app-settings') return native() && native().openAppSettings();
-    if (t.id === 'open-music-app') return native() && native().openApp(playback().app);
+    if (t.id === 'open-music-app') return native() && native().openApp(d.app || playback().app);
     if (t.id === 'retry-play') return act('retry').catch(() => {});
     if (t.id === 'open-full') {
       const n = ui.room.now;

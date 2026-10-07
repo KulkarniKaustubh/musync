@@ -26,22 +26,27 @@ public final class Main {
         private final boolean ready;
         private final java.util.Timer timer = new java.util.Timer(true);
         private volatile String current;
-        private volatile boolean told;
 
         TestPlayer(boolean ready) { this.ready = ready; }
 
+        /** Stands in for a phone that can play two services, or one that has not been given access yet. */
+        public String check(String app) {
+            if (!ready) return "no-access";
+            return app.equals("ytm") || app.equals("soundcloud") ? "ok" : "no-app";
+        }
+
+        public void seek(app.musync.core.Room room, String key, long ms) { }
+
         public void apply(final app.musync.core.Room room, final String key, java.util.Map<String, Object> song,
                           boolean paused, String app, boolean force) {
-            if (!told) {
-                told = true;
-                timer.schedule(new java.util.TimerTask() { public void run() {
-                    if (ready) room.playerMode(true, "ok", ""); else room.playerMode(false, "no-access", "");
-                } }, 50);
-            }
             if (key == null || (key.equals(current) && !force)) { if (key == null) current = null; return; }
             current = key;
-            timer.schedule(new java.util.TimerTask() { public void run() { if (key.equals(current)) room.playerStarted(key, 8000); } }, 300);
-            timer.schedule(new java.util.TimerTask() { public void run() { if (key.equals(current)) room.playerEnded(key); } }, 8300);
+            room.playerStatus("starting", "Finding the song");
+            // Songs take a moment to start, then "play" for eight seconds.
+            timer.schedule(new java.util.TimerTask() { public void run() {
+                if (key.equals(current)) { room.playerStarted(key, 8000); room.playerStatus("ok", ""); }
+            } }, 1200);
+            timer.schedule(new java.util.TimerTask() { public void run() { if (key.equals(current)) room.playerEnded(key); } }, 9200);
         }
     }
 

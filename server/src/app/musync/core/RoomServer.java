@@ -475,7 +475,8 @@ public final class RoomServer {
 
     private void act(Room room, Map<String, Object> b) throws Room.Denied, Halt {
         String token = Json.str(b.get("token")), type = Json.str(b.get("type")), key = Json.str(b.get("key"));
-        if (type.equals("add")) room.add(token, catalog.lookup(Json.str(b.get("ref"))));
+        if (type.equals("add")) room.add(token, catalog.lookup(Json.str(b.get("ref"))), Json.str(b.get("app")));
+        else if (type.equals("seek")) room.seek(token, Json.num(b.get("ms")));
         else if (type.equals("bump")) room.bump(token, key);
         else if (type.equals("remove")) room.remove(token, key);
         else if (type.equals("skip")) room.skip(token, key);

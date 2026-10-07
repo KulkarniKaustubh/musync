@@ -11,6 +11,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -53,7 +54,10 @@ public class MainActivity extends Activity {
     private static HostPlayer player;
     private FrameLayout root;
     private LinearLayout playerPanel;
+    private FrameLayout playerStack;
+    private TextView playerBack;
     private boolean playerShown;
+    private static boolean askedNotifications;
     private static int port;
     private WebView web;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -108,7 +112,7 @@ public class MainActivity extends Activity {
                 public List<String> addresses() { return wifiAddresses(app); }
             });
             final RoomServer s = new RoomServer(files, new Catalog.Live(), true);
-            player = new HostPlayer(new AppPlayer(app), new WebPlayer(app));
+            player = new HostPlayer(app);
             s.setPlayer(player);
             // Opening the port happens off the main thread, which Android reserves for the screen.
             final int[] bound = {-1};
@@ -122,6 +126,7 @@ public class MainActivity extends Activity {
             if (bound[0] < 0) return "The room server could not open a port on this phone.";
             port = bound[0];
             server = s;
+            for (WebPlayer w : player.web) w.setLocalBase(home());
             return null;
         }
     }
@@ -180,12 +185,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (isFinishing()) {
+            PlaybackService.set(this, false);
             synchronized (MainActivity.class) {
                 if (server != null) { server.stop(); server = null; }
             }
         }
-        // The web player outlives this screen; only let go of it here.
-        if (player != null && playerPanel != null) playerPanel.removeView(player.web.view());
+        // The web players outlive this screen; only let go of them here.
+        if (playerStack != null) playerStack.removeAllViews();
         web.destroy();
         super.onDestroy();
     }
@@ -193,7 +199,7 @@ public class MainActivity extends Activity {
     /** Back closes a sheet or steps back inside the app; from the start screen it sends the app to the background. */
     @Override
     public void onBackPressed() {
-        if (playerShown) { showPlayer(false); return; }
+        if (playerShown) { showPlayer(null); return; }
         web.evaluateJavascript("window.musyncBack ? window.musyncBack() : '0'", new ValueCallback<String>() {
             @Override
             public void onReceiveValue(String value) {
@@ -203,9 +209,9 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The music service's web player sits in a panel behind musync's own screen.
-     * It keeps playing there; bringing the panel to the front is only for signing in
-     * or looking at what it is doing.
+     * The music services' web players sit in a panel behind musync's own screen.
+     * They keep playing there; bringing the panel to the front is only for signing in
+     * or looking at what a player is doing.
      */
     private void buildPlayerPanel() {
         if (player == null) return;
@@ -213,31 +219,42 @@ public class MainActivity extends Activity {
         playerPanel = new LinearLayout(this);
         playerPanel.setOrientation(LinearLayout.VERTICAL);
         playerPanel.setBackgroundColor(Color.parseColor("#101011"));
-        TextView back = new TextView(this);
-        back.setText("\u2039  Back to musync");
-        back.setTextColor(Color.parseColor("#1A1606"));
-        back.setBackgroundColor(Color.parseColor("#FFD23F"));
-        back.setTextSize(16);
-        back.setGravity(Gravity.CENTER_VERTICAL);
-        back.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
-        back.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showPlayer(false); }
+        playerBack = new TextView(this);
+        playerBack.setTextColor(Color.parseColor("#1A1606"));
+        playerBack.setBackgroundColor(Color.parseColor("#FFD23F"));
+        playerBack.setTextSize(16);
+        playerBack.setTypeface(playerBack.getTypeface(), android.graphics.Typeface.BOLD);
+        playerBack.setGravity(Gravity.CENTER_VERTICAL);
+        playerBack.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
+        playerBack.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showPlayer(null); }
         });
-        playerPanel.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (52 * dp)));
-        WebView pv = player.web.view();
-        if (pv.getParent() instanceof ViewGroup) ((ViewGroup) pv.getParent()).removeView(pv);
-        playerPanel.addView(pv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        playerPanel.addView(playerBack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (56 * dp)));
+        playerStack = new FrameLayout(this);
+        for (WebPlayer w : player.web) {
+            WebView pv = w.view();
+            if (pv.getParent() instanceof ViewGroup) ((ViewGroup) pv.getParent()).removeView(pv);
+            playerStack.addView(pv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        playerPanel.addView(playerStack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(playerPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
-    private void showPlayer(boolean show) {
+    /** Brings one service's web player to the front, or with null goes back to musync's own screen. */
+    private void showPlayer(String appId) {
         if (playerPanel == null) return;
-        playerShown = show;
-        if (show) {
-            player.web.ensureLoaded();
+        WebPlayer w = appId == null ? null : player.webFor(appId);
+        playerShown = w != null;
+        if (w != null) {
+            w.ensureLoaded();
+            w.view().bringToFront();
+            playerBack.setText("\u2039  Done with " + w.site.name);
             playerPanel.bringToFront();
         } else {
             web.bringToFront();
+            // Signing in changes what this phone can play and what the room screen should offer.
+            player.recheck();
+            web.evaluateJavascript("window.musyncRefresh && window.musyncRefresh()", null);
         }
         root.requestLayout();
         root.invalidate();
@@ -261,13 +278,20 @@ public class MainActivity extends Activity {
         /** "web" when musync plays this music app's songs in its own built-in web player, otherwise "app". */
         @JavascriptInterface
         public String playerKind(String appId) {
-            return HostPlayer.usesWeb(appId) ? "web" : "app";
+            return player != null && player.webFor(appId) != null ? "web" : "app";
         }
 
-        /** Brings the built-in web player to the front, for signing in. */
+        /** For a built-in web player: "in" or "out" for signed in or not, "none" when no account is needed. */
         @JavascriptInterface
-        public void showWebPlayer() {
-            runOnUiThread(new Runnable() { public void run() { showPlayer(true); } });
+        public String webSignedIn(String appId) {
+            WebPlayer w = player == null ? null : player.webFor(appId);
+            return w == null ? "none" : w.site.signedIn();
+        }
+
+        /** Brings a built-in web player to the front, for signing in. */
+        @JavascriptInterface
+        public void showWebPlayer(final String appId) {
+            runOnUiThread(new Runnable() { public void run() { showPlayer(appId); } });
         }
 
         /** "granted" once musync may control music playback, otherwise "missing". */
@@ -309,13 +333,17 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
 
-        /** Keeps the screen on while this phone is hosting, so the room does not stop. */
+        /** Called with true while this phone hosts a room: keeps the room and music going when musync is minimised. */
         @JavascriptInterface
         public void keepAwake(final boolean on) {
             runOnUiThread(new Runnable() {
                 public void run() {
-                    if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    if (on && Build.VERSION.SDK_INT >= 33 && !askedNotifications) {
+                        // Newer Android only shows the "room is open" notification with permission.
+                        askedNotifications = true;
+                        try { requestPermissions(new String[] {"android.permission.POST_NOTIFICATIONS"}, 1); } catch (RuntimeException ignored) { }
+                    }
+                    PlaybackService.set(MainActivity.this, on);
                 }
             });
         }
