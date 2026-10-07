@@ -1,10 +1,20 @@
 package app.syng.android;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -19,6 +29,10 @@ import app.syng.core.RoomServer;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The syng Android app.
@@ -30,8 +44,11 @@ import java.io.InputStream;
  */
 public class MainActivity extends Activity {
     private static RoomServer server; // one per process, survives screen rotation
+    private static AppPlayer player;
     private static int port;
     private WebView web;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private int homeRetries = 0;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -71,7 +88,14 @@ public class MainActivity extends Activity {
                     return getApplicationContext().getAssets().open("web/" + path);
                 }
             };
+            // Android knows which of its networks are Wi-Fi or Ethernet; the invite link must use one of those.
+            final Context app = getApplicationContext();
+            RoomServer.setAddressSource(new RoomServer.AddressSource() {
+                public List<String> addresses() { return wifiAddresses(app); }
+            });
             final RoomServer s = new RoomServer(files, new Catalog.Live(), true);
+            player = new AppPlayer(app);
+            s.setPlayer(player);
             // Opening the port happens off the main thread, which Android reserves for the screen.
             final int[] bound = {-1};
             Thread t = new Thread(new Runnable() {
@@ -88,8 +112,49 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** This phone's addresses on Wi-Fi and Ethernet, as the system reports them. */
+    @SuppressWarnings("deprecation")
+    private static List<String> wifiAddresses(Context app) {
+        List<String> out = new ArrayList<String>();
+        try {
+            ConnectivityManager cm = (ConnectivityManager) app.getSystemService(Context.CONNECTIVITY_SERVICE);
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                if (caps == null) continue;
+                if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) && !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) continue;
+                LinkProperties lp = cm.getLinkProperties(n);
+                if (lp == null) continue;
+                for (LinkAddress la : lp.getLinkAddresses()) {
+                    InetAddress a = la.getAddress();
+                    if (a instanceof Inet4Address) out.add(a.getHostAddress());
+                }
+            }
+        } catch (Throwable ignored) { }
+        try {
+            WifiManager wm = (WifiManager) app.getSystemService(Context.WIFI_SERVICE);
+            int ip = wm.getConnectionInfo().getIpAddress();
+            if (ip != 0) out.add((ip & 0xff) + "." + ((ip >> 8) & 0xff) + "." + ((ip >> 16) & 0xff) + "." + ((ip >> 24) & 0xff));
+        } catch (Throwable ignored) { }
+        return out;
+    }
+
     private static String home() {
         return "http://127.0.0.1:" + port + "/";
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (player != null) {
+            player.setForeground(true);
+            player.recheck(); // the user may be coming back from granting access
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (player != null) player.setForeground(false);
+        super.onPause();
     }
 
     @Override
@@ -135,6 +200,45 @@ public class MainActivity extends Activity {
             }
         }
 
+        /** "granted" once syng may control music playback, otherwise "missing". */
+        @JavascriptInterface
+        public String mediaAccess() {
+            return AppPlayer.hasAccess(getApplicationContext()) ? "granted" : "missing";
+        }
+
+        /** Opens the Android screen where the user allows syng to control playback. */
+        @JavascriptInterface
+        public void requestMediaAccess() {
+            try {
+                Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception e) {
+                openAppSettings();
+            }
+        }
+
+        /** Opens syng's own page in Settings, where "Allow restricted settings" lives on newer phones. */
+        @JavascriptInterface
+        public void openAppSettings() {
+            try {
+                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Exception ignored) { }
+        }
+
+        /** Brings the host's music app to the front, so it is running and can take requests. */
+        @JavascriptInterface
+        public void openApp(String appId) {
+            String pkg = AppPlayer.packageOf(appId);
+            if (pkg == null) return;
+            try {
+                Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+                if (i != null) startActivity(i);
+            } catch (Exception ignored) { }
+        }
+
         /** Keeps the screen on while this phone is hosting, so the room does not stop. */
         @JavascriptInterface
         public void keepAwake(final boolean on) {
@@ -160,7 +264,19 @@ public class MainActivity extends Activity {
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (!request.isForMainFrame()) return;
             String failing = request.getUrl().toString();
-            if (failing.startsWith(home())) return;
+            if (failing.startsWith(home())) {
+                // Our own screen did not load. Try again a few times, then explain instead of showing a browser error.
+                final String why = String.valueOf(error.getDescription()) + " (" + error.getErrorCode() + ")";
+                if (homeRetries++ < 5) {
+                    main.postDelayed(new Runnable() { public void run() { web.loadUrl(home()); } }, 500);
+                } else {
+                    view.loadData("<body style='background:#101011;color:#f4f4f5;font:16px sans-serif;padding:24px'>"
+                            + "<h2>syng couldn’t open its screen</h2><p>The part of the app that runs the room did not answer.</p>"
+                            + "<p>Close syng completely and open it again. If this keeps happening, report this detail: " + why + "</p>",
+                            "text/html; charset=utf-8", "utf-8");
+                }
+                return;
+            }
             // Another phone's room could not be reached: come back to our own start screen and say so.
             view.loadUrl(home() + "#notice=" + Uri.encode("Couldn’t reach that room. Check that you’re on the same Wi-Fi as the host."));
         }

@@ -10,20 +10,28 @@ One shared music queue that everyone in the room adds to from their own phone.
 - **Real search.** Songs, artists and cover art come from two public catalogs
   that need no account or key: Apple's iTunes Search API and Deezer's search
   API.
-- **Sound.** The host's phone is the speaker and plays each song's 30-second
-  preview. Anyone else can turn sound on for their own device.
-- **Your own app.** Each person picks the music app they use. "Open in
-  Spotify" (or Apple Music, YouTube Music, Tidal, Amazon Music, Deezer,
-  SoundCloud) opens the full song there.
+- **Whole songs, in the host's own music app.** The host's phone starts each
+  song in the music app the host chose (Spotify, Apple Music, YouTube Music,
+  Tidal, Amazon Music, Deezer or SoundCloud), from the host's own account, and
+  moves to the next song when it ends. Pause and skip in syng control that
+  app. See "Whole songs" below for the one-time setup.
+- **Your own app.** Each person picks the music app they use. Guests get
+  "Open in Spotify" (or their app) to hear a song on their own phone.
+- **Previews as a fallback.** Until the host allows access, or when the room is
+  hosted from a browser, the host's device plays each song's 30-second preview.
 - **Queue rules.** Anyone can add and bump. The host can pause, skip and remove
   any song. You can skip or remove your own. If the host leaves, the person who
   has been there longest becomes host.
 
 ## What does not work, and why
 
-- **Full songs inside the room.** The streaming services do not let a new app
-  play full tracks from a person's account (see `PRODUCT.md`). Previews are
-  what the catalogs offer freely.
+- **Whole songs on every phone at once.** Only the host's phone plays. Guests
+  who are apart open the song in their own app; it is not kept in time.
+- **Exact matches every time.** syng asks the music app to play "title, artist"
+  by search, the same way a voice assistant does. The app may pick a different
+  version; syng shows what the app actually started.
+- **Spotify Free.** Spotify only plays a chosen song on demand for Premium
+  accounts. On Free it plays something related.
 - **Rooms across the internet from the phone app.** A phone can only serve
   people on its own network. For friends who are apart, run the standalone
   server somewhere they can all reach (below).
@@ -33,18 +41,37 @@ One shared music queue that everyone in the room adds to from their own phone.
 
 ## Not yet tested
 
-Everything in "What works" is covered by automated tests on a computer, using
-a built-in sample catalog. Three things could not be run in the build
-environment and need a first try on real devices: the Android app itself, the
-two live catalog calls, and finding a host by 4-character code across two
-phones. QR code and link joining do not depend on that last one.
+The room, the queue, joining by link and code, and the whole-song flow (using a
+stand-in player) are covered by automated tests on a computer. These could not
+be run in the build environment and need a first try on real devices:
+
+- the Android app itself, including how it finds the phone's Wi-Fi address
+- starting songs in each real music app. This is the least certain part: each
+  app answers "play this search" in its own way
+- the two live catalog calls
+
+If a song does not start, the line under the song says what happened. That
+text is the useful thing to report.
 
 ## Install the Android app
 
 Install `syng.apk`. It is signed with a self-made key for sideloading, not for
 the Play Store, so Android will ask you to allow installs from your browser or
-file manager. It needs Android 6 or newer and asks for one permission, network
-access. Uninstall the earlier "syng prototype" app if you installed it.
+file manager. It needs Android 6 or newer. Uninstall the earlier "syng
+prototype" app if you installed it.
+
+## Whole songs: one-time setup on the host's phone
+
+1. Start a room and pick your music app.
+2. Tap **Allow access** on the "Play whole songs" card and switch syng on.
+   Android calls this "notification access". It is the only way Android lets
+   one app control another app's playback. syng does not read notifications.
+3. If Android says the setting is restricted (Android 13 and newer do this for
+   apps installed from a file): tap **Open syng's settings**, tap the three
+   dots at the top right, tap **Allow restricted settings**, then do step 2
+   again.
+4. Add a song. If the music app has not been opened since the phone started,
+   syng opens it once to wake it up.
 
 ## Run the server on a computer
 
@@ -55,7 +82,8 @@ java -jar syng-server.jar --lan      # one room, like the phone app
 
 Then open the address it prints. Options: `--port 8787`, `--web <folder>` to
 serve the client from disk while developing, `--sample-catalog` to search a
-small built-in list with no internet.
+small built-in list with no internet, `--test-player ready` to stand in for
+the phone's music app when testing.
 
 ## Build
 
@@ -76,12 +104,16 @@ java -jar build/syng-server.jar --port 8801 --sample-catalog &
 node test/rooms.e2e.mjs        # needs Playwright; drives a host and two guests
 ```
 
+`test/lan.e2e.mjs` (joining over Wi-Fi) and `test/full.e2e.mjs` (whole songs)
+list the servers they need at the top of each file.
+
 ## What is where
 
 - `web/` the client: plain HTML, CSS and JavaScript, no build step
 - `server/` the room server: plain Java, no dependencies. `core/` is shared
   with the Android app
-- `android/` the Android app: one screen that starts the server and shows the client
+- `android/` the Android app: starts the server, shows the client, and drives
+  the host's music app (`AppPlayer.java`)
 - `PRODUCT.md` what the product is and what is still undecided
 - `DESIGN.md` the visual system
 - `.claude/skills/impeccable/` the Impeccable design skill, v4.5.0, Apache 2.0,
@@ -93,5 +125,7 @@ node test/rooms.e2e.mjs        # needs Playwright; drives a host and two guests
   that Wi-Fi who has the address can join.
 - Searches go from the host's device to Apple and Deezer. Cover art and preview
   audio load directly from their servers on each device.
+- Notification access is used only to find and control the music app's
+  playback. syng's notification listener is empty and reads nothing.
 - No accounts, no analytics, nothing stored on a server beyond the room while
   it is open.

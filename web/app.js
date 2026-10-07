@@ -47,6 +47,7 @@
     app: saved.app || '',
     room: saved.room || '',      // the room to come back to after a reload
     home: saved.home || '',      // where "leave" returns to when this page is another phone's server
+    address: saved.address || '', // this phone's Wi-Fi address, typed in by hand when it cannot be detected
   };
   const persist = () => store.write(device);
   persist();
@@ -75,9 +76,14 @@
   const nameOf = (id) => (person(id) || {}).name || 'Someone';
   const colorOf = (id) => (person(id) || {}).color || 'sky';
   const isHost = () => !!ui.room && ui.room.hostId === ui.me;
-  const isPlayer = () => isHost() || ui.listening;
+  const isPlayer = () => !fullMode() && (isHost() || ui.listening);
   const pickLabel = (id) => (id === ui.me ? 'Your pick' : nameOf(id) + '’s pick');
   const myApp = () => (person(ui.me) || {}).app || device.app || 'spotify';
+  // How the room makes sound: "full" means the host's phone plays whole songs in
+  // the host's own music app; "preview" means 30-second clips in the browser.
+  const playback = () => (ui.room && ui.room.playback) || { mode: 'preview', app: '', device: false, status: '', detail: '' };
+  const fullMode = () => playback().mode === 'full';
+  const native = () => window.SyngNative || null;
 
   // ---------- server ----------
 
@@ -286,13 +292,38 @@
     return found.find(Boolean) || null;
   }
 
-  /** The link friends open to join. On the host's own phone that is its Wi-Fi address, not localhost. */
-  function inviteLink() {
-    const loop = /^(localhost|127\.|\[::1\])/.test(location.hostname);
-    const base = loop && ui.info.addresses.length ? `http://${ui.info.addresses[0]}:${ui.info.port}` : location.origin;
-    return `${base}/#join=${ui.room.code}`;
+  const onLoopback = () => /^(localhost|127\.|\[::1\])/.test(location.hostname);
+  const validAddress = (ip) => /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && ip.split('.').every((n) => +n <= 255) && !/^(127|0|169\.254)\./.test(ip);
+
+  /** The address other phones can reach this one at, or '' when it is not known. */
+  function reachableBase() {
+    if (!onLoopback()) return location.origin;
+    const ip = ui.info.addresses[0] || (validAddress(device.address) ? device.address : '');
+    return ip ? `http://${ip}:${ui.info.port || location.port || 8787}` : '';
   }
-  const offWifi = () => ui.info.lan && ui.info.local && !ui.info.addresses.length;
+
+  /** On a phone the code follows its current address; elsewhere it is the room's own code. */
+  function roomCode() {
+    if (ui.info.lan && ui.info.code) return ui.info.code;
+    if (ui.info.lan && onLoopback() && validAddress(device.address)) return lanCodeFor(device.address);
+    return ui.room.code;
+  }
+  function lanCodeFor(ip) {
+    const [, , c, d] = ip.split('.').map(Number);
+    let v = (c << 12) | (d << 4) | ((c ^ d ^ (c >> 4) ^ (d >> 4)) & 15), out = '';
+    for (let shift = 15; shift >= 0; shift -= 5) out += ALPHABET[(v >> shift) & 31];
+    return out;
+  }
+
+  /** The link friends open to join. It is never a localhost address: that only works on this phone. */
+  function inviteLink() {
+    const base = reachableBase();
+    return base ? `${base}/#join=${roomCode()}` : '';
+  }
+
+  async function refreshInfo() {
+    try { ui.info = await api('/api/info'); } catch (_) { /* keep what we have */ }
+  }
 
   // ---------- views ----------
 
@@ -318,7 +349,7 @@
         <ol class="steps">
           <li><span><b>Start or join a room</b>${ui.info.lan ? 'Everyone on the same Wi-Fi can join. No account needed.' : 'No account needed. A room is just a code.'}</span></li>
           <li><span><b>Search and add songs</b>Real songs from Apple Music’s and Deezer’s catalogs.</span></li>
-          <li><span><b>Listen together</b>The room plays 30-second previews. Open any song in your own app to hear all of it.</span></li>
+          <li><span><b>Listen together</b>The host’s phone plays each song in the host’s own music app. Without that, the room plays 30-second previews.</span></li>
         </ol>
       </div>
     </main>`;
@@ -345,7 +376,7 @@
         </div>
         <fieldset>
           <legend>Your music app</legend>
-          <p class="legend-help">Full songs open here. You can change it later.</p>
+          <p class="legend-help">If you host, songs play in this app from your account. You can change it later.</p>
           ${appOptions('app', device.app)}
           <p class="field-error" id="setup-app-error" role="alert" hidden></p>
         </fieldset>
@@ -362,7 +393,7 @@
       <header class="roombar" id="roombar">
         <div class="roombar-id">
           <span class="roombar-name" data-slot="roomname"></span>
-          <span class="roombar-code">Code <b>${esc(ui.room.code)}</b></span>
+          <span class="roombar-code">Code <b data-slot="code">${esc(roomCode())}</b></span>
         </div>
         <div class="roombar-actions">
           <button type="button" class="people-btn" id="open-people" data-slot="people"></button>
@@ -373,6 +404,7 @@
         <section class="room-col room-col-now" aria-labelledby="now-h">
           <div class="section-head"><h2 id="now-h" data-slot="nowhead"></h2></div>
           <div data-slot="now"></div>
+          <div data-slot="setup"></div>
         </section>
         <section class="room-col" aria-labelledby="next-h">
           <div class="addbar"><button type="button" class="addbar-btn" id="open-search">${ICON.search}<span>Add a song</span></button></div>
@@ -393,7 +425,7 @@
           <section class="tv-join" aria-label="How to join">
             <div class="qr" id="tv-qr" role="img" aria-label="QR code to join this room"></div>
             <div><h2>Scan to add songs</h2><p>or enter the room code</p>
-              <p class="invite-code">${esc(ui.room.code)}</p></div>
+              <p class="invite-code">${esc(roomCode())}</p></div>
           </section>
           <section class="tv-next" aria-labelledby="tv-next">
             <div class="section-head"><h2 id="tv-next">Up next</h2><span data-slot="count"></span></div>
@@ -407,7 +439,41 @@
   // ---------- live regions ----------
 
   const eq = (on) => `<span class="eq${on ? ' is-on' : ''}" aria-hidden="true"><i></i><i></i><i></i></span>`;
-  const sourceLine = (song) => '30-second preview from ' + (CATALOGS[song.src] || 'the catalog');
+  function sourceLine(song) {
+    if (!fullMode()) return '30-second preview from ' + (CATALOGS[song.src] || 'the catalog');
+    const whose = isHost() ? 'your' : nameOf(ui.room.hostId) + '’s';
+    return `Playing in ${whose} ${appName(playback().app)}`;
+  }
+
+  /** Anything the host needs to know or do about playback, shown under the song. */
+  function playbackNote() {
+    const pb = playback();
+    if (!fullMode() || !pb.detail || pb.status === 'starting') return '';
+    let action = '';
+    if (isHost() && native()) {
+      if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app">Open ${esc(appName(pb.app))}</button>`;
+      if (pb.status === 'failed' || pb.status === 'needs-open') action += '<button type="button" class="btn btn-sm" id="retry-play">Try again</button>';
+    }
+    return `<div class="now-note"><p>${esc(pb.detail)}</p>${action ? `<div class="now-actions">${action}</div>` : ''}</div>`;
+  }
+
+  /** On the host's phone: how to switch from previews to whole songs. */
+  function setupCardHTML() {
+    const pb = playback();
+    if (!isHost() || !native() || !pb.device || fullMode()) return '';
+    const app = esc(appName(pb.app));
+    if (pb.status === 'no-app') {
+      return `<div class="card"><b>${app} isn’t on this phone</b>
+        <p>The room is playing 30-second previews. To play whole songs, install ${app} or pick the music app you have.</p>
+        <div class="now-actions"><button type="button" class="btn btn-sm" id="change-app">Change app</button></div></div>`;
+    }
+    return `<div class="card"><b>Play whole songs in ${app}</b>
+      <p>The room is playing 30-second previews. syng can start each song in your ${app} app instead, from your own account.</p>
+      <p>Android asks for “notification access” before one app may control another’s playback. syng uses it only for that and does not read your notifications.</p>
+      <div class="now-actions"><button type="button" class="btn btn-sm btn-primary" id="grant-access">Allow access</button></div>
+      <p class="card-help">If Android says the setting is restricted: open syng’s settings, tap the three dots at the top, then “Allow restricted settings”, and try again.</p>
+      <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open syng’s settings</button></div></div>`;
+  }
 
   function nowHTML() {
     const n = ui.room.now;
@@ -416,7 +482,7 @@
       return `<div class="tv-cover">${cover(n.song, true)}</div>
         <div><p class="tv-label">${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}</p>
           <h1 class="tv-title">${esc(n.song.title)}</h1><p class="tv-artist">${esc(n.song.artist)}</p></div>
-        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second'))}</span></p>
+        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second').replace('Playing in', 'playing in'))}</span></p>
         ${progressHTML()}`;
     }
     if (!n) return '<div class="empty"><b>Nothing is playing</b>The room starts when someone adds a song.</div>';
@@ -426,13 +492,14 @@
     if (ui.needsTap && isPlayer()) actions.push(`<button type="button" class="btn btn-sm btn-primary" id="tap-sound">${ICON.sound}Turn sound on</button>`);
     if (isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
     if (isHost() || mine) actions.push(`<button type="button" class="btn btn-sm" id="skip">${ICON.skip}${mine && !isHost() ? 'Skip my song' : 'Skip'}</button>`);
-    if (!isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
+    if (!isHost() && !fullMode()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
     actions.push(`<button type="button" class="btn btn-sm" id="open-full" data-key="${n.key}">${ICON.open}Open in ${esc(appName(app))}</button>`);
     return `<div class="now" style="--tint: hsl(${hueOf(n.song)} 44% 36%)">
       <div class="now-top">${cover(n.song, true)}
         <div><h3 class="now-title">${esc(n.song.title)}</h3><p class="now-artist">${esc(n.song.artist)}</p></div></div>
       <div class="now-pick">${avatar(n.by)}<div class="now-pick-text"><b>${esc(pickLabel(n.by))}</b><span>${esc(sourceLine(n.song))}</span></div></div>
       ${progressHTML()}
+      ${playbackNote()}
       <div class="now-actions">${actions.join('')}</div>
     </div>`;
   }
@@ -517,6 +584,9 @@
       slot('nowhead').innerHTML = n ? `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}` : 'Now playing';
       slot('people').innerHTML = peopleBtnHTML();
       slot('roomname').textContent = isHost() ? 'Your room' : nameOf(ui.room.hostId) + '’s room';
+      slot('code').textContent = roomCode();
+      const card = setupCardHTML();
+      if (slot('setup').innerHTML !== card) slot('setup').innerHTML = card;
     }
     paintProgress(true);
 
@@ -573,8 +643,10 @@
 
   function drawQR(box) {
     if (!box || typeof qrcode !== 'function' || !ui.room) return;
+    const link = inviteLink();
+    if (!link) { box.hidden = true; return; }
     const qr = qrcode(0, 'M');
-    qr.addData(inviteLink());
+    qr.addData(link);
     qr.make();
     box.innerHTML = qr.createSvgTag({ scalable: true, margin: 0 });
   }
@@ -696,7 +768,7 @@
     }
     if (s.q.length < 2) {
       results.innerHTML = `<li class="results-note"><b>Find a song</b>Search by song or artist. Results come from ${esc(scopeLabel)}.
-        The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.</li>`;
+        ${fullMode() ? `The host’s phone plays the whole song in ${esc(appName(playback().app))}.` : `The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.`}</li>`;
       return;
     }
     if (!s.songs.length) {
@@ -754,14 +826,24 @@
 
   function renderPeople() {
     const link = inviteLink();
-    $('#people-body').innerHTML = `
-      <section class="sheet-section" aria-labelledby="inv-h"><h3 id="inv-h">Invite</h3>
-        ${offWifi() ? '<p class="notice">This phone isn’t on Wi-Fi, so friends can’t reach the room yet. Connect to Wi-Fi or turn on your hotspot.</p>' : ''}
+    // No address means friends cannot reach this phone yet. Say so, and never show a localhost link.
+    const invite = link ? `
         <div class="invite"><div class="qr" id="invite-qr" role="img" aria-label="QR code to join this room"></div>
-          <div><p>Room code</p><p class="invite-code">${esc(ui.room.code)}</p>
+          <div><p>Room code</p><p class="invite-code">${esc(roomCode())}</p>
             <button type="button" class="btn btn-sm" id="copy-link">${ICON.copy}Copy invite link</button></div></div>
-        <p class="invite-help">${ui.info.lan ? 'Friends on the same Wi-Fi scan the code or open' : 'Friends scan the code or open'} <span class="invite-link">${esc(link)}</span></p>
-      </section>
+        <p class="invite-help">${ui.info.lan ? 'Friends on the same Wi-Fi scan the code or open' : 'Friends scan the code or open'} <span class="invite-link">${esc(link)}</span></p>` : `
+        <div class="notice"><b>Friends can’t reach this phone yet</b>
+          <p>syng couldn’t find this phone’s Wi-Fi address. Connect to Wi-Fi, or turn on your hotspot and have friends join it.</p>
+          <button type="button" class="btn btn-sm" id="check-address">Check again</button></div>
+        <form id="address-form" class="address-form" novalidate>
+          <label class="field-label" for="address-input">Or enter this phone’s Wi-Fi address</label>
+          <p class="legend-help">Find it in Settings, Wi-Fi, your network, IP address. It looks like 192.168.1.23.</p>
+          <div class="join-row"><input class="field" id="address-input" inputmode="decimal" autocomplete="off" placeholder="192.168.1.23" value="${esc(device.address)}" aria-describedby="address-error">
+            <button type="submit" class="btn">Use</button></div>
+          <p class="field-error" id="address-error" role="alert" hidden></p>
+        </form>`;
+    $('#people-body').innerHTML = `
+      <section class="sheet-section" aria-labelledby="inv-h"><h3 id="inv-h">Invite</h3>${invite}</section>
       <section class="sheet-section" aria-labelledby="ppl-h"><h3 id="ppl-h">${people(ui.room.people.length)} here</h3>
         <ul>${ui.room.people.map((p) => `<li class="person">${avatar(p.id, 'avatar-lg')}
           <div><span class="person-name">${esc(p.id === ui.me ? p.name + ' (you)' : p.name)}${p.host ? '<span class="tag">Host</span>' : ''}${p.online ? '' : '<span class="tag">Away</span>'}</span>
@@ -774,10 +856,15 @@
       </div>`;
     drawQR($('#invite-qr'));
   }
-  function openPeople() { renderPeople(); $('#people-sheet').showModal(); }
+  function openPeople() {
+    renderPeople();
+    $('#people-sheet').showModal();
+    // The phone may have joined Wi-Fi since we last looked.
+    refreshInfo().then(() => { if ($('#people-sheet').open) renderPeople(); if (ui.view === 'room') refresh(true); });
+  }
 
   function openAppPicker() {
-    $('#service-body').innerHTML = `<p class="setup-sub">Full songs open in this app.</p>
+    $('#service-body').innerHTML = `<p class="setup-sub">If you host, songs play in this app. “Open in” also uses it.</p>
       <form id="service-form">${appOptions('app-pick', myApp())}
       <button type="submit" class="btn btn-primary btn-block">Use this app</button></form>`;
     $('#service-sheet').showModal();
@@ -888,6 +975,10 @@
       return toast(ui.listening ? 'Sound is on for this device' : 'Sound is off for this device');
     }
     if (t.id === 'tap-sound') { ui.needsTap = false; player.play().catch(() => {}); syncPlayer(); return refresh(true); }
+    if (t.id === 'grant-access') return native() && native().requestMediaAccess();
+    if (t.id === 'open-app-settings') return native() && native().openAppSettings();
+    if (t.id === 'open-music-app') return native() && native().openApp(playback().app);
+    if (t.id === 'retry-play') return act('retry').catch(() => {});
     if (t.id === 'open-full') {
       const n = ui.room.now;
       return n && openOutside(fullSongUrl(n.song, myApp()));
@@ -897,6 +988,13 @@
     if (t.id === 'search-retry') return queueSearch(true);
     if (d.add) return addSong(d.add);
 
+    if (t.id === 'check-address') {
+      t.disabled = true; t.textContent = 'Checking';
+      return refreshInfo().then(() => {
+        renderPeople();
+        if (!inviteLink()) toast('Still no Wi-Fi address found');
+      });
+    }
     if (t.id === 'copy-link') {
       const link = inviteLink();
       const done = () => toast('Invite link copied');
@@ -988,12 +1086,26 @@
       return;
     }
 
+    if (id === 'address-form') {
+      const field = $('#address-input'), err = $('#address-error');
+      const ip = field.value.trim();
+      if (!validAddress(ip)) {
+        err.textContent = 'That doesn’t look like a Wi-Fi address. It should be four numbers with dots, like 192.168.1.23.';
+        err.hidden = false; field.setAttribute('aria-invalid', 'true'); field.focus();
+        return;
+      }
+      device.address = ip; persist();
+      renderPeople();
+      if (ui.view === 'room') refresh(true);
+      return toast('Invite link updated');
+    }
+
     if (id === 'service-form') {
       const picked = ev.target.querySelector('input:checked');
       $('#service-sheet').close();
       if (!picked) return;
       device.app = picked.value; persist();
-      act('app', { app: picked.value }).then(() => toast('Full songs now open in ' + appName(picked.value))).catch(() => {});
+      act('app', { app: picked.value }).then(() => toast('Your music app is now ' + appName(picked.value))).catch(() => {});
     }
   });
 

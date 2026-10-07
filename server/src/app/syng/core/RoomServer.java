@@ -58,6 +58,16 @@ public final class RoomServer {
     });
     private volatile ServerSocket socket;
     private volatile boolean running;
+    private volatile Room.Player player;
+
+    /** In LAN mode, the device that runs the server can also play whole songs for its room. */
+    public void setPlayer(Room.Player p) { player = p; }
+
+    /** The room this device is hosting, if any (LAN mode has at most one). */
+    public Room hostedRoom() {
+        Iterator<Room> it = rooms.values().iterator();
+        return lanMode && it.hasNext() ? it.next() : null;
+    }
 
     public RoomServer(Files files, Catalog catalog, boolean lanMode) {
         this.files = files;
@@ -160,30 +170,112 @@ public final class RoomServer {
         throw new IllegalStateException("No free room codes");
     }
 
-    /** Private IPv4 addresses of this machine, Wi-Fi style addresses first. */
+    /** Lets the platform (Android) contribute addresses it knows belong to Wi-Fi or Ethernet. */
+    public interface AddressSource {
+        List<String> addresses();
+    }
+
+    private static volatile AddressSource platformAddresses;
+
+    public static void setAddressSource(AddressSource source) { platformAddresses = source; }
+
+    /**
+     * IPv4 addresses other devices on the local network can use to reach this
+     * one, best guess first. Never contains a loopback address.
+     *
+     * Three sources are merged, because each one fails on some devices: what the
+     * platform reports for Wi-Fi and Ethernet, every network interface, and the
+     * address the system would use for an outgoing connection.
+     */
     public static List<String> lanAddresses() {
-        List<String> out = new ArrayList<String>();
+        final Map<String, Integer> score = new HashMap<String, Integer>();
+
+        AddressSource platform = platformAddresses;
+        if (platform != null) {
+            try {
+                for (String a : platform.addresses()) offer(score, a, 100);
+            } catch (Throwable ignored) { }
+        }
+
         try {
             Enumeration<NetworkInterface> nis = NetworkInterface.getNetworkInterfaces();
             while (nis != null && nis.hasMoreElements()) {
-                NetworkInterface ni = nis.nextElement();
-                if (!ni.isUp() || ni.isLoopback()) continue;
-                // Mobile data and VPN links also use private-looking addresses, but nobody nearby can reach them.
-                String n = ni.getName() == null ? "" : ni.getName().toLowerCase(Locale.ROOT);
-                if (n.contains("rmnet") || n.startsWith("ccmni") || n.startsWith("pdp") || n.startsWith("tun")
-                        || n.startsWith("ppp") || n.startsWith("dummy") || n.startsWith("clat")) continue;
-                Enumeration<InetAddress> as = ni.getInetAddresses();
-                while (as.hasMoreElements()) {
-                    InetAddress a = as.nextElement();
-                    if (a instanceof Inet4Address && a.isSiteLocalAddress()) {
-                        String name = ni.getName() == null ? "" : ni.getName();
-                        if (name.startsWith("wlan") || name.startsWith("ap") || name.startsWith("swlan")) out.add(0, a.getHostAddress());
-                        else out.add(a.getHostAddress());
+                // One odd interface must not hide the others, so each is read on its own.
+                try {
+                    NetworkInterface ni = nis.nextElement();
+                    String name = ni.getName() == null ? "" : ni.getName().toLowerCase(Locale.ROOT);
+                    if (isMobileOrTunnel(name)) continue;
+                    boolean up = true;
+                    try { up = ni.isUp() && !ni.isLoopback(); } catch (Exception e) { /* assume usable */ }
+                    if (!up) continue;
+                    boolean wifiLike = isWifiLike(name);
+                    Enumeration<InetAddress> as = ni.getInetAddresses();
+                    while (as.hasMoreElements()) {
+                        InetAddress a = as.nextElement();
+                        if (!(a instanceof Inet4Address)) continue;
+                        // Home networks use private ranges; some campus and office networks do not.
+                        int points = (wifiLike ? 60 : 30) + (a.isSiteLocalAddress() ? 30 : 0);
+                        offer(score, a.getHostAddress(), points);
                     }
-                }
+                } catch (Exception ignored) { }
             }
-        } catch (Exception ignored) { }
+        } catch (Throwable ignored) { }
+
+        // The address used for outgoing traffic. connect() on a UDP socket sends nothing.
+        try {
+            java.net.DatagramSocket probe = new java.net.DatagramSocket();
+            try {
+                probe.connect(InetAddress.getByAddress(new byte[] {8, 8, 8, 8}), 53);
+                InetAddress local = probe.getLocalAddress();
+                String name = "";
+                try {
+                    NetworkInterface ni = NetworkInterface.getByInetAddress(local);
+                    if (ni != null && ni.getName() != null) name = ni.getName().toLowerCase(Locale.ROOT);
+                } catch (Exception ignored) { }
+                if (local instanceof Inet4Address && !isMobileOrTunnel(name)) offer(score, local.getHostAddress(), 50);
+            } finally {
+                probe.close();
+            }
+        } catch (Throwable ignored) { }
+
+        List<String> out = new ArrayList<String>(score.keySet());
+        Collections.sort(out, new java.util.Comparator<String>() {
+            public int compare(String x, String y) {
+                int d = score.get(y) - score.get(x);
+                return d != 0 ? d : x.compareTo(y);
+            }
+        });
         return out;
+    }
+
+    private static void offer(Map<String, Integer> score, String ip, int points) {
+        if (!usable(ip)) return;
+        Integer had = score.get(ip);
+        if (had == null || had < points) score.put(ip, points);
+    }
+
+    /** True for an IPv4 address another device could actually connect to. */
+    static boolean usable(String ip) {
+        if (ip == null || !ip.matches("\\d{1,3}(\\.\\d{1,3}){3}")) return false;
+        String[] p = ip.split("\\.");
+        int a = Integer.parseInt(p[0]), b = Integer.parseInt(p[1]), c = Integer.parseInt(p[2]);
+        if (a == 0 || a == 127 || a >= 224) return false;      // unset, loopback, multicast
+        if (a == 169 && b == 254) return false;                 // self-assigned, no network
+        if (a == 192 && b == 0 && c == 0) return false;         // IPv6-only translation, not reachable
+        return true;
+    }
+
+    private static boolean isWifiLike(String name) {
+        return name.startsWith("wlan") || name.startsWith("wl") || name.startsWith("ap") || name.startsWith("swlan")
+                || name.startsWith("softap") || name.startsWith("eth") || name.startsWith("en")
+                || name.startsWith("rndis") || name.startsWith("usb") || name.startsWith("br");
+    }
+
+    /** Mobile data and VPN links have addresses too, but nobody nearby can reach them. */
+    private static boolean isMobileOrTunnel(String name) {
+        return name.contains("rmnet") || name.startsWith("ccmni") || name.startsWith("pdp") || name.startsWith("tun")
+                || name.startsWith("ppp") || name.startsWith("dummy") || name.contains("clat") || name.startsWith("wwan")
+                || name.startsWith("ipsec") || name.startsWith("epdg") || name.startsWith("p2p");
     }
 
     // ---------- HTTP ----------
@@ -318,6 +410,7 @@ public final class RoomServer {
                 room = new Room(randomCode());
             }
             String me = room.join(token, Json.str(req.body.get("name")), Json.str(req.body.get("app")));
+            if (lanMode && player != null) room.setPlayer(player, me);
             rooms.put(room.code, room);
             json(out, 200, Json.map("me", me, "code", room.code, "state", room.state()), false);
             return;
@@ -344,8 +437,11 @@ public final class RoomServer {
             String what = parts.length > 1 ? parts[1] : "";
 
             if (get && what.length() == 0) {
-                Room r = rooms.get(code);
-                json(out, 200, Json.map("exists", r != null), true);
+                boolean exists = rooms.containsKey(code);
+                if (!exists && lanMode && !rooms.isEmpty()) {
+                    for (String ip : lanAddresses()) if (codeForAddress(ip).equals(code)) exists = true;
+                }
+                json(out, 200, Json.map("exists", exists), true);
                 return;
             }
             Room room = room(code);
@@ -370,6 +466,9 @@ public final class RoomServer {
 
     private Room room(String code) throws Halt {
         Room r = code == null ? null : rooms.get(code.toUpperCase(Locale.ROOT));
+        // A phone hosts one room. Its code follows the phone's address, which can change
+        // (Wi-Fi joined after the room started), so any code reaches that room.
+        if (r == null && lanMode && !rooms.isEmpty()) r = rooms.values().iterator().next();
         if (r == null) throw new Halt(404, "That room has ended or the code is wrong.");
         return r;
     }
@@ -385,6 +484,7 @@ public final class RoomServer {
         else if (type.equals("ended")) room.ended(token, key);
         else if (type.equals("duration")) room.duration(token, key, Json.num(b.get("ms")));
         else if (type.equals("app")) room.setApp(token, Json.str(b.get("app")));
+        else if (type.equals("retry")) room.retry(token);
         else if (type.equals("leave")) room.leave(token);
         else throw new Halt(400, "Unknown action.");
     }

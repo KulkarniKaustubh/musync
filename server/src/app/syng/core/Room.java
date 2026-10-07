@@ -27,6 +27,25 @@ public final class Room {
     private static final String[] COLORS = {"coral", "sky", "mint", "lilac", "peach", "pink", "teal"};
     /** Previews run about 30 seconds; the host's player reports the real length. */
     private static final long DEFAULT_MS = 30000;
+    /** Used for a full song until its real length is known. */
+    private static final long FULL_DEFAULT_MS = 240000;
+
+    /**
+     * Something on the host's device that can play whole songs, such as the
+     * Android app driving the host's own music app. The room tells it what
+     * should be audible; it reports back the real length and when a song ends.
+     */
+    public interface Player {
+        /**
+         * Called whenever what should be playing changes. Must return at once.
+         *
+         * @param key   the entry to play, or null for silence
+         * @param song  that entry's song data, or null
+         * @param app   the host's music app id ("spotify", "apple", ...)
+         * @param force true to start the song again even if it is the current one
+         */
+        void apply(Room room, String key, Map<String, Object> song, boolean paused, String app, boolean force);
+    }
 
     public static final class Denied extends Exception {
         public Denied(String message) { super(message); }
@@ -74,6 +93,12 @@ public final class Room {
     private long startedAt;      // server clock when the current song (re)started from position 0
     private long pausedAtMs;     // position when paused
     private long durationMs = DEFAULT_MS;
+    private Player player;
+    private String playerOwner;          // the person whose device the player runs on
+    private boolean playerReady;         // that device can play whole songs right now
+    private String playerStatus = "";    // short machine word: ok, starting, needs-open, failed, no-access, no-app
+    private String playerDetail = "";    // one plain sentence for people
+    private String lastApplied = "";
     private long seq = 0;
     private long lastActivity = System.currentTimeMillis();
 
@@ -186,9 +211,101 @@ public final class Room {
         changed();
     }
 
+    // ---------- whole-song playback on the host's device ----------
+
+    /** Attaches the device player. It is only used while its owner is the host. */
+    public synchronized void setPlayer(Player p, String ownerId) {
+        player = p;
+        playerOwner = ownerId;
+        changed();
+    }
+
+    /** True when whole songs play on the host's device rather than previews in the browser. */
+    private boolean full() {
+        return player != null && playerReady && hostId != null && hostId.equals(playerOwner);
+    }
+
+    public synchronized boolean isFull() { return full(); }
+
+    public synchronized String hostApp() {
+        for (Member m : byToken.values()) if (m.id.equals(hostId)) return m.app;
+        return "";
+    }
+
+    /** The device player says whether it can play whole songs, and why not if it cannot. */
+    public synchronized void playerMode(boolean ready, String status, String detail) {
+        boolean was = full();
+        playerReady = ready;
+        playerStatus = status == null ? "" : status;
+        playerDetail = detail == null ? "" : detail;
+        if (full() != was && now != null) {
+            // Switching between previews and whole songs: the current song starts over.
+            durationMs = full() ? fullLength(now) : DEFAULT_MS;
+            startedAt = System.currentTimeMillis();
+            pausedAtMs = 0;
+            paused = false;
+        }
+        changed();
+    }
+
+    public synchronized void playerStatus(String status, String detail) {
+        String s = status == null ? "" : status, d = detail == null ? "" : detail;
+        if (s.equals(playerStatus) && d.equals(playerDetail)) return;
+        playerStatus = s;
+        playerDetail = d;
+        changed();
+    }
+
+    /** The device player started the song and knows its real length. The clock restarts from here. */
+    public synchronized void playerStarted(String key, long ms) {
+        if (!full() || now == null || !now.key.equals(key)) return;
+        if (ms >= 5000 && ms <= 3600000) durationMs = ms;
+        startedAt = System.currentTimeMillis();
+        pausedAtMs = 0;
+        changed();
+    }
+
+    public synchronized void playerEnded(String key) {
+        if (!full() || now == null || !now.key.equals(key)) return;
+        next();
+        changed();
+    }
+
+    /** The host asks the device player to start the current song again. */
+    public synchronized void retry(String token) throws Denied {
+        Member m = member(token);
+        if (!m.id.equals(hostId)) throw new Denied("Only the host can restart playback.");
+        if (player != null && full()) {
+            lastApplied = "";
+            notifyPlayer(true);
+        }
+    }
+
+    private static long fullLength(Entry e) {
+        long ms = Json.num(e.song.get("ms"));
+        return ms >= 5000 ? ms : FULL_DEFAULT_MS;
+    }
+
+    /** Tells the device player what should be audible, once per real change. */
+    private void notifyPlayer(boolean force) {
+        if (player == null) return;
+        boolean on = full();
+        String app = hostApp();
+        String sig = on + "|" + (now == null ? "-" : now.key) + "|" + paused + "|" + app;
+        if (!force && sig.equals(lastApplied)) return;
+        lastApplied = sig;
+        try {
+            if (on && now != null) player.apply(this, now.key, now.song, paused, app, force);
+            else player.apply(this, null, null, false, app, force);
+        } catch (RuntimeException ignored) {
+            // a misbehaving player must not break the room
+        }
+    }
+
     /** The host's player says the current song finished. */
     public synchronized void ended(String token, String key) throws Denied {
         Member m = member(token);
+        if (full()) return; // the device player decides when whole songs end
         if (!m.id.equals(hostId) || now == null || !now.key.equals(key)) return;
         next();
         changed();
@@ -197,6 +314,7 @@ public final class Room {
     /** The host's player reports how long the clip really is. */
     public synchronized void duration(String token, String key, long ms) throws Denied {
         Member m = member(token);
+        if (full()) return;
         if (!m.id.equals(hostId) || now == null || !now.key.equals(key)) return;
         if (ms < 1000 || ms > 900000 || Math.abs(ms - durationMs) < 500) return;
         durationMs = ms;
@@ -217,7 +335,9 @@ public final class Room {
     /** Called about once a second: moves on when a song has run its length and nobody reported the end. */
     public synchronized void tick() {
         if (now == null || paused) return;
-        if (System.currentTimeMillis() - startedAt > durationMs + 2500) {
+        // With a device player the end normally comes from it; this is the safety net.
+        long grace = full() ? 20000 : 2500;
+        if (System.currentTimeMillis() - startedAt > durationMs + grace) {
             next();
             changed();
         }
@@ -226,7 +346,7 @@ public final class Room {
     private void start(Entry e) {
         now = e;
         paused = false;
-        durationMs = DEFAULT_MS;
+        durationMs = full() ? fullLength(e) : DEFAULT_MS;
         startedAt = System.currentTimeMillis();
         pausedAtMs = 0;
     }
@@ -277,7 +397,11 @@ public final class Room {
             n.put("duration", durationMs);
             playing = n;
         }
-        return Json.map("code", code, "hostId", hostId, "people", people, "now", playing, "queue", q, "serverTime", t);
+        Map<String, Object> playback = Json.map("mode", full() ? "full" : "preview", "app", hostApp(),
+                "device", player != null && hostId != null && hostId.equals(playerOwner),
+                "status", playerStatus, "detail", playerDetail);
+        return Json.map("code", code, "hostId", hostId, "people", people, "now", playing, "queue", q,
+                "playback", playback, "serverTime", t);
     }
 
     private Map<String, Object> entry(Entry e) {
@@ -303,6 +427,7 @@ public final class Room {
 
     private void changed() {
         lastActivity = System.currentTimeMillis();
+        notifyPlayer(false);
         if (listeners.isEmpty()) return;
         Map<String, Object> state = state();
         List<Subscription> stuck = new ArrayList<Subscription>();

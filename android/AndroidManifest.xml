@@ -1,13 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="app.syng"
-    android:versionCode="2"
-    android:versionName="0.2.0">
+    android:versionCode="4"
+    android:versionName="0.3.0">
 
     <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="34" />
 
     <!-- Serves the room to phones on the same Wi-Fi and reaches the music catalogs. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Reads this phone's Wi-Fi address so the invite link points at it. No location, no network names. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- The music apps syng can start songs in. Android hides other apps unless they are listed. -->
+    <queries>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.apple.android.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.aspiro.tidal" />
+        <package android:name="com.amazon.mp3" />
+        <package android:name="deezer.android.app" />
+        <package android:name="com.soundcloud.android" />
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+    </queries>
 
     <!-- Rooms are served over plain http on the local network, so cleartext must be allowed. -->
     <application
@@ -28,5 +45,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Lets the user grant "notification access", which Android requires before one app
+             may control another app's playback. syng does not read notifications. -->
+        <service
+            android:name=".android.MediaAccessService"
+            android:label="syng playback control"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

@@ -60,6 +60,19 @@ public class CoreTest {
         check("lan codes differ per address", !RoomServer.codeForAddress("192.168.1.37").equals(RoomServer.codeForAddress("192.168.1.38")));
         System.out.println("CODE " + RoomServer.codeForAddress("192.168.1.37") + " " + RoomServer.codeForAddress("10.0.200.5") + " " + RoomServer.codeForAddress("172.20.0.255"));
 
+        // Addresses offered to guests must be ones they can reach.
+        java.util.List<String> lan = RoomServer.lanAddresses();
+        boolean clean = true;
+        for (String ip : lan) if (ip.startsWith("127.") || ip.startsWith("169.254.") || ip.equals("0.0.0.0")) clean = false;
+        check("detected addresses never include localhost or self-assigned ones (found " + lan + ")", clean);
+        RoomServer.setAddressSource(new RoomServer.AddressSource() {
+            public java.util.List<String> addresses() { return java.util.Arrays.asList("127.0.0.1", "192.168.50.7", "169.254.3.3", "not an ip"); }
+        });
+        java.util.List<String> merged = RoomServer.lanAddresses();
+        check("a platform-reported Wi-Fi address comes first, junk is dropped", merged.size() > 0 && merged.get(0).equals("192.168.50.7")
+            && !merged.contains("127.0.0.1") && !merged.contains("169.254.3.3") && !merged.contains("not an ip"));
+        RoomServer.setAddressSource(null);
+
         // Room rules.
         Room r = new Room("TEST");
         String host = r.join("host-token-0123456789", "Maya", "spotify");
@@ -89,6 +102,50 @@ public class CoreTest {
         check("someone who has not joined cannot add", threw);
         r.leave("host-token-0123456789");
         check("when the host leaves, the next person becomes host", guest.equals(r.state().get("hostId")));
+
+        // Whole-song playback through a device player.
+        final java.util.List<String> calls = new java.util.ArrayList<String>();
+        Room.Player fake = new Room.Player() {
+            public void apply(Room room, String key, Map<String, Object> song, boolean paused, String app, boolean force) {
+                calls.add((key == null ? "silence" : Json.str(song.get("title"))) + "/" + (paused ? "paused" : "playing") + "/" + app + (force ? "/force" : ""));
+            }
+        };
+        Room f = new Room("FULL");
+        String owner = f.join("owner-token-0123456789", "Kau", "spotify");
+        f.join("friend-token-0123456789", "Dev", "tidal");
+        f.setPlayer(fake, owner);
+        List<Map<String, Object>> list = new Catalog.Sample().search("e", "apple", "US").songs;
+        f.add("friend-token-0123456789", list.get(0));
+        check("without access the room stays on previews", "preview".equals(Json.obj(f.state().get("playback")).get("mode")));
+        check("in preview mode the player is told to stay silent", calls.size() > 0 && calls.get(calls.size() - 1).startsWith("silence"));
+        f.playerMode(true, "ok", "");
+        check("once the device is ready the room switches to whole songs", "full".equals(Json.obj(f.state().get("playback")).get("mode")));
+        check("the player is asked to play the current song in the host's app", calls.get(calls.size() - 1).equals(list.get(0).get("title") + "/playing/spotify"));
+        check("a whole song is not cut at 30 seconds", Json.num(Json.obj(f.state().get("now")).get("duration")) > 60000);
+        String k = Json.str(Json.obj(f.state().get("now")).get("key"));
+        f.playerStarted(k, 201000);
+        check("the real length from the music app is used", Json.num(Json.obj(f.state().get("now")).get("duration")) == 201000);
+        int n = calls.size();
+        f.bump("friend-token-0123456789", "nothing");
+        f.add("owner-token-0123456789", list.get(1));
+        check("queue changes do not restart the song", calls.size() == n);
+        f.setPaused("owner-token-0123456789", true);
+        check("pause reaches the player", calls.get(calls.size() - 1).endsWith("/paused/spotify"));
+        f.setPaused("owner-token-0123456789", false);
+        f.ended("owner-token-0123456789", k);
+        check("the browser cannot end a whole song early", k.equals(Json.str(Json.obj(f.state().get("now")).get("key"))));
+        f.playerEnded(k);
+        check("when the app finishes a song the next one is sent to it", calls.get(calls.size() - 1).equals(list.get(1).get("title") + "/playing/spotify"));
+        f.setApp("owner-token-0123456789", "ytm");
+        check("changing the host's app moves playback to it", calls.get(calls.size() - 1).endsWith("/playing/ytm"));
+        f.retry("owner-token-0123456789");
+        check("retry starts the song again", calls.get(calls.size() - 1).endsWith("/force"));
+        f.playerEnded(Json.str(Json.obj(f.state().get("now")).get("key")));
+        check("an empty queue silences the player", calls.get(calls.size() - 1).startsWith("silence"));
+        f.add("friend-token-0123456789", list.get(2));
+        f.leave("owner-token-0123456789");
+        check("if the phone's owner stops being host, their app stops and the room returns to previews",
+            calls.get(calls.size() - 1).startsWith("silence") && "preview".equals(Json.obj(f.state().get("playback")).get("mode")));
 
         System.out.println(failed == 0 ? "\nAll checks passed" : "\n" + failed + " check(s) failed");
         System.exit(failed == 0 ? 0 : 1);

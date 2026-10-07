@@ -8,10 +8,9 @@ web
 
 ## Stack
 
-delegated: static HTML, CSS and JavaScript with no build step, for the UI
-prototype. Chosen because there is no backend yet, it previews anywhere, and it
-keeps the design work separate from the framework decision. Revisit when the
-room service and real playback are built.
+delegated: static HTML, CSS and JavaScript with no build step for the client;
+a dependency-free Java room server shared by the Android app and a standalone
+jar. Chosen so the whole thing builds without Gradle or a framework.
 
 ## Users
 
@@ -61,25 +60,29 @@ Confirmed:
 Terminology: room, room code, queue, add, bump (move a song up), pick
 ("Maya's pick").
 
-Built in version 0.2 (see README for what is tested):
+Built in version 0.3 (see README for what is tested):
 
 - The host's phone runs the room and serves it to everyone on the same Wi-Fi.
   A standalone server covers people who are apart.
-- Search and 30-second previews come from Apple's and Deezer's public
-  catalogs. Each person's chosen app is used to open the full song.
-- The host's device is the speaker. Others can turn sound on for themselves.
+- Search comes from Apple's and Deezer's public catalogs.
+- The host's phone is the speaker. It plays whole songs by driving the host's
+  own music app through Android's media controls, from the host's account.
+  30-second previews are the fallback when that is not set up.
+- Guests open a song in their own app to hear it on their own phone.
 - Anyone can add and bump; the host can pause, skip and remove any song; a
   person can skip or remove their own. These rules were chosen to get a working
   version and are open to change.
 
 Still undecided:
 
-- Whether full songs can ever play inside the room. A song playing from the
-  account of whoever added it needs each service's developer approval.
-  Research on 2026-10-06 found that only Apple Music and YouTube currently
-  offer third-party playback that a new app can use; Spotify limits new apps to
-  five users, and Tidal and Amazon Music restrict full playback to approved
-  partners.
+- "A song plays from the account of the person who added it" is not built.
+  Today every song plays from the host's account. Playing from each adder's
+  account means that person's phone must be the speaker, or each service must
+  approve in-app playback. Research on 2026-10-06 found that only Apple Music
+  and YouTube currently offer third-party playback that a new app can use;
+  Spotify limits new apps to five users, and Tidal and Amazon Music restrict
+  full playback to approved partners.
+- Whether guests who are apart should hear the song in time with the host.
 - Whether to host a public server so the app works for people who are apart
   without anyone running their own.
 

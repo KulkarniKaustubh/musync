@@ -303,6 +303,11 @@ svg { display: block; }
 .now-actions .btn { background: var(--layer-2); background: color-mix(in oklab, var(--text) 12%, transparent); }
 .now-actions .btn:hover:not(:disabled) { background: color-mix(in oklab, var(--text) 20%, transparent); }
 
+.card { display: grid; gap: 10px; justify-items: start; padding: 16px; border-radius: var(--r-lg); background: var(--layer-1); color: var(--text-2); font-size: var(--t-sm); }
+.card b { color: var(--text); font-size: var(--t-base); font-weight: 800; }
+.card-help { color: var(--text-3); }
+.now-note { display: grid; gap: 8px; font-size: var(--t-sm); }
+.now-note p { color: var(--text); font-weight: 600; }
 .empty { display: grid; gap: 4px; justify-items: start; padding: 20px 16px; border-radius: var(--r-lg); background: var(--layer-1); color: var(--text-2); }
 .empty b { color: var(--text); font-size: var(--t-lg); font-weight: 800; }
 .empty .btn { margin-top: 10px; }
@@ -456,7 +461,12 @@ svg { display: block; }
 .btn-danger-text { color: var(--danger); }
 .invite-help { color: var(--text-2); font-size: var(--t-sm); }
 .invite-link { color: var(--text); font-weight: 700; overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
-.sheet-section .notice { background: var(--layer-2); }
+.sheet-section .notice { display: grid; gap: 8px; justify-items: start; background: var(--layer-2); font-weight: 400; }
+.sheet-section .notice b { font-size: var(--t-base); font-weight: 800; }
+.sheet-section .notice p { color: var(--text-2); }
+.address-form { display: grid; gap: 6px; }
+.address-form .field-label { margin-bottom: 0; }
+.qr[hidden] + div { grid-column: 1 / -1; }
 .person-name .tag { font-weight: 700; }
 
 /* shown while the live connection to the room is down */

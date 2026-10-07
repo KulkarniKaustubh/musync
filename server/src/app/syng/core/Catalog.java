@@ -22,9 +22,9 @@ public abstract class Catalog {
 
     /** One search result, as plain data ready to be written as JSON. */
     public static Map<String, Object> song(String src, String id, String title, String artist, String album,
-                                           String art, String artBig, String preview, String url) {
+                                           String art, String artBig, String preview, String url, long ms) {
         return Json.map("src", src, "id", id, "ref", src + ":" + id, "title", title, "artist", artist,
-                "album", album, "art", art, "artBig", artBig, "preview", preview, "url", url);
+                "album", album, "art", art, "artBig", artBig, "preview", preview, "url", url, "ms", ms);
     }
 
     public static final class Result {
@@ -132,7 +132,7 @@ public abstract class Catalog {
                 String art = https(Json.str(r.get("artworkUrl100")));
                 out.add(song(APPLE, id, title, Json.str(r.get("artistName")), Json.str(r.get("collectionName")),
                         art, art.replace("100x100", "600x600"), https(Json.str(r.get("previewUrl"))),
-                        https(Json.str(r.get("trackViewUrl")))));
+                        https(Json.str(r.get("trackViewUrl"))), Json.num(r.get("trackTimeMillis"))));
             }
             return out;
         }
@@ -148,7 +148,7 @@ public abstract class Catalog {
                 Map<String, Object> album = Json.obj(r.get("album"));
                 out.add(song(DEEZER, id, title, Json.str(Json.obj(r.get("artist")).get("name")), Json.str(album.get("title")),
                         https(Json.str(album.get("cover_medium"))), https(Json.str(album.get("cover_xl"))),
-                        https(Json.str(r.get("preview"))), https(Json.str(r.get("link")))));
+                        https(Json.str(r.get("preview"))), https(Json.str(r.get("link"))), Json.num(r.get("duration")) * 1000));
             }
             return out;
         }
@@ -203,8 +203,8 @@ public abstract class Catalog {
             for (int i = 0; i < SONGS.length; i++) {
                 String[] s = SONGS[i];
                 if (!(s[0] + " " + s[1]).toLowerCase().contains(q)) continue;
-                if (!DEEZER.equals(src)) out.songs.add(song(APPLE, "s" + i, s[0], s[1], s[2], "", "", "", ""));
-                if (!APPLE.equals(src)) out.songs.add(song(DEEZER, "s" + i, s[0], s[1], s[2], "", "", "", ""));
+                if (!DEEZER.equals(src)) out.songs.add(song(APPLE, "s" + i, s[0], s[1], s[2], "", "", "", "", 0));
+                if (!APPLE.equals(src)) out.songs.add(song(DEEZER, "s" + i, s[0], s[1], s[2], "", "", "", "", 0));
             }
             remember(out.songs);
             return out;
