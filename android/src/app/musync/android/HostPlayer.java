@@ -24,6 +24,7 @@ final class HostPlayer implements Room.Player {
         web = new WebPlayer[] {
             new WebPlayer(ctx, WebPlayer.YOUTUBE_MUSIC),
             new WebPlayer(ctx, WebPlayer.SOUNDCLOUD),
+            new WebPlayer(ctx, WebPlayer.SPOTIFY),
         };
     }
 

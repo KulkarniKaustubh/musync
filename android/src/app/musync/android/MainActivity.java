@@ -234,10 +234,23 @@ public class MainActivity extends Activity {
         for (WebPlayer w : player.web) {
             WebView pv = w.view();
             if (pv.getParent() instanceof ViewGroup) ((ViewGroup) pv.getParent()).removeView(pv);
-            playerStack.addView(pv, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            playerStack.addView(pv, playerSize(w, false));
         }
         playerPanel.addView(playerStack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(playerPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /**
+     * A web player fills the screen while the person is looking at it. Out of sight, a
+     * player built for computer screens gets a computer-sized page, so its full set of
+     * controls is laid out for musync to work.
+     */
+    private FrameLayout.LayoutParams playerSize(WebPlayer w, boolean shown) {
+        if (shown || !w.site.desktop()) {
+            return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        float dp = getResources().getDisplayMetrics().density;
+        return new FrameLayout.LayoutParams((int) (1100 * dp), (int) (720 * dp));
     }
 
     /** Brings one service's web player to the front, or with null goes back to musync's own screen. */
@@ -247,10 +260,12 @@ public class MainActivity extends Activity {
         playerShown = w != null;
         if (w != null) {
             w.ensureLoaded();
+            w.view().setLayoutParams(playerSize(w, true));
             w.view().bringToFront();
             playerBack.setText("\u2039  Done with " + w.site.name);
             playerPanel.bringToFront();
         } else {
+            for (WebPlayer each : player.web) each.view().setLayoutParams(playerSize(each, false));
             web.bringToFront();
             // Signing in changes what this phone can play and what the room screen should offer.
             player.recheck();

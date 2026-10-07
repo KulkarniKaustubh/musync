@@ -65,8 +65,8 @@ Built in version 0.5 (see README for what is tested):
 - The host's phone runs the room and serves it to everyone on the same Wi-Fi.
   A standalone server covers people who are apart.
 - Search comes from Apple's and Deezer's public catalogs and names no service.
-- The host's phone is the speaker and plays whole songs. YouTube Music and
-  SoundCloud play in web players built into the app; other services play by
+- The host's phone is the speaker and plays whole songs. YouTube Music,
+  SoundCloud and Spotify play in web players built into the app; other services play by
   driving the app installed on the phone. The phone app never plays previews.
 - A song plays in the service its picker uses when the host's phone can play
   it, otherwise in the host's. All songs in one service play from the one

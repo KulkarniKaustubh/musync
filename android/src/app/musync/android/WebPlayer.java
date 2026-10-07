@@ -58,6 +58,16 @@ final class WebPlayer implements Room.Player {
         String clickFirst() { return null; }
         /** "in", "out", or "none" when the service plays without an account. */
         String signedIn() { return "none"; }
+        /** True when nothing plays until the person has signed in. */
+        boolean needsAccount() { return false; }
+        /** Where signing in starts, or null to use the front page. */
+        String signInUrl() { return null; }
+        /** True for players built for computer screens: they get a computer-sized page while out of sight. */
+        boolean desktop() { return false; }
+        /** JavaScript run while a song's page loads, to press its play button once; null when songs start by themselves. */
+        String startJs() { return null; }
+        /** How long a song may take to become audible before musync says it did not start. */
+        long startTimeoutMs() { return 20000; }
     }
 
     static final Site YOUTUBE_MUSIC = new Site("ytm", "YouTube Music", "https://music.youtube.com/", "ytm.probe.js") {
@@ -89,6 +99,60 @@ final class WebPlayer implements Room.Player {
         String command(String what, long ms) { return "if(window.__mp_cmd)window.__mp_cmd('" + what + "'," + ms + ");"; }
     };
 
+    /**
+     * Spotify's web player is built for computer browsers and only plays from a
+     * signed-in account. Its audio element is kept out of the page, so musync
+     * works its visible controls: the song page's play button, the play/pause
+     * button and the progress bar.
+     */
+    static final Site SPOTIFY = new Site("spotify", "Spotify", "https://open.spotify.com/", "spotify.probe.js") {
+        String searchUrl(String q) { return home + "search/" + Uri.encode(q) + "/tracks"; }
+        String playUrl(String pick, String localBase) { return home + "track/" + pick; }
+        boolean needsAccount() { return true; }
+        boolean desktop() { return true; }
+        long startTimeoutMs() { return 35000; }
+        String signInUrl() { return "https://accounts.spotify.com/login?continue=" + Uri.encode(home); }
+        String signedIn() {
+            try {
+                String c = CookieManager.getInstance().getCookie(home);
+                return c != null && c.contains("sp_dc=") ? "in" : "out";
+            } catch (RuntimeException e) {
+                return "out";
+            }
+        }
+        String startJs() {
+            // Press the song page's own play button, once. If nothing moves after a while, allow one more press.
+            return "var S=window.__musync||(window.__musync={});"
+                + "if(location.pathname.indexOf('/track/')<0)return;"
+                + "if(S.clicked&&!S.adv&&Date.now()-S.clickedAt>9000&&(S.tries||0)<2){S.clicked=false;}"
+                + "if(S.clicked)return;"
+                + "var b=document.querySelector('[data-testid=\"action-bar-row\"] [data-testid=\"play-button\"]')"
+                + "||document.querySelector('main [data-testid=\"play-button\"]')"
+                + "||document.querySelector('[data-testid=\"play-button\"]');"
+                + "if(b){S.clicked=true;S.clickedAt=Date.now();S.tries=(S.tries||0)+1;b.click();}";
+        }
+        String command(String what, long ms) {
+            if (what.equals("seek")) {
+                // The progress bar holds a slider; failing that, press the bar at the right spot.
+                return "var S=window.__musync||{};var d=S.d||0;if(!d)return;var r=Math.max(0,Math.min(1," + ms + "/d));"
+                    + "var bar=document.querySelector('[data-testid=\"playback-progressbar\"]');if(!bar)return;"
+                    + "var i=bar.querySelector('input[type=\"range\"]');"
+                    + "if(i){var lo=+i.min||0,hi=+i.max||0;"
+                    + "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(i,String(Math.round(lo+(hi-lo)*r)));"
+                    + "i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    + "else{var c=bar.getBoundingClientRect(),x=c.left+c.width*r,y=c.top+c.height/2;"
+                    + "['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(n){"
+                    + "bar.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window}));});}";
+            }
+            // One button both plays and pauses, so press it only when the player is in the other state.
+            boolean wantPause = what.equals("pause");
+            return "var S=window.__musync||{};var st=navigator.mediaSession?navigator.mediaSession.playbackState:'none';"
+                + "var playing=st==='playing'||(st!=='paused'&&!!S.adv);"
+                + "var b=document.querySelector('[data-testid=\"control-button-playpause\"]');"
+                + "if(b&&playing===" + wantPause + ")b.click();";
+        }
+    };
+
     /** A web view that keeps saying it is on screen, so the page does not stop the music when musync is minimised. */
     private static final class AlwaysVisible extends WebView {
         AlwaysVisible(Context c) { super(c); }
@@ -115,6 +179,7 @@ final class WebPlayer implements Room.Player {
     private long phaseAt;
     private String pick;
     private boolean polling, warned, clicked, nudged, announcedAd;
+    private long lastT;
 
     @SuppressLint("SetJavaScriptEnabled")
     WebPlayer(Context ctx, Site site) {
@@ -136,7 +201,14 @@ final class WebPlayer implements Room.Player {
         s.setAllowContentAccess(false);
         // Present as the phone's ordinary browser. Music sites send embedded browsers to their app instead.
         String agent = s.getUserAgentString();
-        if (agent != null) s.setUserAgentString(agent.replace("; wv", "").replaceAll("Version/\\d+\\.\\d+ ", ""));
+        if (agent != null && site.desktop()) {
+            // A player built for computers: present as a computer browser of the same version.
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/([\\d.]+)").matcher(agent);
+            String version = m.find() ? m.group(1) : "126.0.0.0";
+            s.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + version + " Safari/537.36");
+        } else if (agent != null) {
+            s.setUserAgentString(agent.replace("; wv", "").replaceAll("Version/\\d+\\.\\d+ ", ""));
+        }
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true); // sign-in passes through the account site
         web.setWebViewClient(new WebViewClient() {
@@ -185,8 +257,14 @@ final class WebPlayer implements Room.Player {
 
     /** Shows the service's front page when nothing is loaded yet, so there is something to sign in to. */
     void ensureLoaded() {
+        if (phase != IDLE) return; // a song is loading or playing; leave the page alone
         String url = web.getUrl();
-        if (phase == IDLE && (url == null || url.length() == 0 || url.startsWith("about:") || url.startsWith(localBase))) web.loadUrl(site.home);
+        boolean blank = url == null || url.length() == 0 || url.startsWith("about:") || url.startsWith(localBase);
+        if ("out".equals(site.signedIn()) && site.signInUrl() != null) {
+            if (blank || !url.contains("accounts.")) web.loadUrl(site.signInUrl());
+        } else if (blank) {
+            web.loadUrl(site.home);
+        }
     }
 
     /** Stops the sound; used when the next song belongs to a different player. */
@@ -200,7 +278,10 @@ final class WebPlayer implements Room.Player {
     }
 
     @Override
-    public String check(String app) { return site.id.equals(app) ? "ok" : "no-app"; }
+    public String check(String app) {
+        if (!site.id.equals(app)) return "no-app";
+        return site.needsAccount() && !"in".equals(site.signedIn()) ? "sign-in" : "ok";
+    }
 
     @Override
     public void seek(Room r, final String k, final long ms) {
@@ -244,6 +325,14 @@ final class WebPlayer implements Room.Player {
         clicked = false;
         nudged = false;
         announcedAd = false;
+        lastT = 0;
+        if (site.needsAccount() && !"in".equals(site.signedIn())) {
+            // Signed out since the room last asked: say so and let the room route songs elsewhere.
+            phase = IDLE;
+            status("failed", "Sign in to " + site.name + " to play this song.");
+            try { room.playerRecheck(); } catch (RuntimeException ignored) { }
+            return;
+        }
         status("starting", "Finding the song in " + site.name);
         String q = (str(song.get("title")) + " " + str(song.get("artist"))).trim();
         web.loadUrl(site.searchUrl(q));
@@ -321,18 +410,23 @@ final class WebPlayer implements Room.Player {
             }
             if (has && !isPaused && t > 300) {
                 phase = PLAYING;
-                if (pick == null) pick = str(p.get("playing"));
+                // What the player says it is playing is the truth from here on; a service may
+                // swap a song for its own copy with a different id.
+                if (pick == null || str(p.get("playing")).length() > 0) pick = str(p.get("playing"));
+                lastT = t;
                 r.playerStarted(key, d);
                 r.playerProgress(key, t, d);
                 status("ok", "");
                 if (paused) js(site.command("pause", 0));
                 return;
             }
-            if (has && isPaused && age > 4000 && !nudged) {
+            if (site.startJs() != null) {
+                js(site.startJs());
+            } else if (has && isPaused && age > 4000 && !nudged) {
                 nudged = true;
                 js(site.command("play", 0));
             }
-            if (age > 20000 && !warned) {
+            if (age > site.startTimeoutMs() && !warned) {
                 warned = true;
                 status("failed", site.name + " didn’t start the song. " + report(p));
             }
@@ -343,7 +437,10 @@ final class WebPlayer implements Room.Player {
         if (ad) return;
         String playing = str(p.get("playing"));
         boolean movedOn = pick != null && pick.length() > 0 && playing.length() > 0 && !playing.equals(pick);
-        boolean atEnd = ended || (d > 0 && t >= d - 900);
+        // Reached the end, or was in its last seconds and has now snapped back to the start.
+        boolean wrapped = d > 0 && lastT >= d - 3500 && t < 2500 && t < lastT;
+        boolean atEnd = ended || (d > 0 && t >= d - 900) || wrapped;
+        lastT = t;
         if (movedOn || atEnd) {
             // The web player would carry on with its own suggestions; the room decides what is next.
             js(site.command("pause", 0));
@@ -366,10 +463,11 @@ final class WebPlayer implements Room.Player {
             where = href;
         }
         List<Object> picks = Json.arr(p.get("picks"));
-        return String.format(Locale.ROOT, "(page: %s; songs listed: %d; links: %d; player: %s%s)", where,
+        String note = str(p.get("note"));
+        return String.format(Locale.ROOT, "(page: %s; songs listed: %d; rows: %d; player: %s%s%s)", where,
             picks == null ? 0 : picks.size(), Json.num(p.get("rows")),
             !Boolean.TRUE.equals(p.get("has")) ? "none" : Boolean.TRUE.equals(p.get("paused")) ? "paused" : "playing",
-            Boolean.TRUE.equals(p.get("ad")) ? ", ad" : "");
+            Boolean.TRUE.equals(p.get("ad")) ? ", ad" : "", note.length() > 0 ? "; " + note : "");
     }
 
     private void js(String code) {

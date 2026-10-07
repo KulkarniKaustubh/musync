@@ -2,6 +2,7 @@
 // Start two servers first:
 //   java -jar build/musync-server.jar --lan --port 8791 --sample-catalog --test-player ready
 //   java -jar build/musync-server.jar --lan --port 8789 --sample-catalog --test-player no-access
+//   java -jar build/musync-server.jar --lan --port 8792 --sample-catalog --test-player sign-in
 import { chromium } from 'playwright';
 
 const browser = await chromium.launch({ executablePath: process.env.MUSYNC_TEST_CHROMIUM || '/opt/pw-browsers/chromium' });
@@ -18,8 +19,9 @@ async function page(nativeStub) {
       requestMediaAccess: () => window.__calls.push('requestMediaAccess'), openAppSettings: () => window.__calls.push('openAppSettings'),
       openApp: (a) => window.__calls.push('openApp ' + a),
       // YouTube Music and SoundCloud play in web players built into the app; YouTube Music takes an account.
-      playerKind: (a) => (a === 'ytm' || a === 'soundcloud' ? 'web' : 'app'),
-      webSignedIn: (a) => (a === 'ytm' ? (window.__signedIn ? 'in' : 'out') : 'none'),
+      // Spotify plays that way too, but only once signed in.
+      playerKind: (a) => (a === 'ytm' || a === 'soundcloud' || a === 'spotify' ? 'web' : 'app'),
+      webSignedIn: (a) => (a === 'ytm' ? (window.__signedIn ? 'in' : 'out') : a === 'spotify' ? 'out' : 'none'),
       showWebPlayer: (a) => window.__calls.push('showWebPlayer ' + a) };
   });
   return p;
@@ -97,6 +99,7 @@ check('pause still works from the host', true);
 await host.click('#open-people');
 const svc = await host.locator('#people-body').innerText();
 check('the room sheet lists what this phone plays', svc.includes('This phone plays') && svc.includes('Signed in') && svc.includes('No account needed'));
+check('a service that needs an account offers sign-in there', svc.includes('Sign in to play Spotify songs here') && await host.locator('#people-body [data-show-player="spotify"]').count() === 1);
 if (shots) await host.screenshot({ path: `${shots}/full-services.png` });
 await host.click('#people-sheet [data-close]');
 await host.click('#open-search');
@@ -107,11 +110,11 @@ await host.click('#search-sheet [data-close]');
 const fresh = await page(true);
 await fresh.goto('http://localhost:8789');
 await fresh.click('#start-room');
-await setup(fresh, 'Kau', 'Spotify');
+await setup(fresh, 'Kau', 'Tidal');
 await fresh.click('#people-sheet [data-close]');
 await fresh.waitForSelector('.card');
 const card = await fresh.locator('.card').innerText();
-check('the host is told the one step that is left', card.includes('One step before the music plays') && card.includes('Spotify'));
+check('the host is told the one step that is left', card.includes('One step before the music plays') && card.includes('Tidal'));
 check('the card says what the permission is for', card.includes('notification access') && card.includes('does not read your notifications'));
 await fresh.click('#grant-access');
 await fresh.click('#open-app-settings');
@@ -124,6 +127,21 @@ check('the host is not sent to another app', await fresh.locator('#open-full').c
 check('the setup step sits above the song', await fresh.evaluate(() => document.querySelector('.card').getBoundingClientRect().top < document.querySelector('.now').getBoundingClientRect().top));
 check('nothing to drag before the song can play', await fresh.locator('[data-scrub]').count() === 0);
 if (shots) await fresh.screenshot({ path: `${shots}/full-setup.png`, fullPage: true });
+
+// --- the host's service plays inside musync but needs signing in first ---
+const sp = await page(true);
+await sp.goto('http://localhost:8792');
+await sp.click('#start-room');
+await setup(sp, 'Kau', 'Spotify');
+await sp.click('#people-sheet [data-close]');
+await sp.waitForSelector('.card-step');
+const signCard = await sp.locator('.card-step').innerText();
+check('a host whose service needs an account is asked to sign in', signCard.includes('Sign in to Spotify to start') && !signCard.includes('notification access'));
+await sp.click('.card-step [data-show-player="spotify"]');
+check('the button opens that service’s sign-in', (await sp.evaluate(() => window.__calls)).includes('showWebPlayer spotify'));
+await add(sp, 'th', 1);
+check('the song waits until then', (await sp.locator('.now-pick-text').innerText()).includes('Waiting for the step above'));
+if (shots) await sp.screenshot({ path: `${shots}/full-signin.png` });
 
 await browser.close();
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');

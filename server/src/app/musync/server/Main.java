@@ -23,15 +23,16 @@ public final class Main {
      * a computer: every song "plays" for eight seconds and then ends.
      */
     private static final class TestPlayer implements app.musync.core.Room.Player {
-        private final boolean ready;
+        private final String mode; // "ready", "no-access" or "sign-in"
         private final java.util.Timer timer = new java.util.Timer(true);
         private volatile String current;
 
-        TestPlayer(boolean ready) { this.ready = ready; }
+        TestPlayer(String mode) { this.mode = mode; }
 
-        /** Stands in for a phone that can play two services, or one that has not been given access yet. */
+        /** Stands in for a phone that can play two services, one that has not been given access, or one not signed in. */
         public String check(String app) {
-            if (!ready) return "no-access";
+            if (mode.equals("no-access")) return "no-access";
+            if (mode.equals("sign-in") && app.equals("spotify")) return "sign-in";
             return app.equals("ytm") || app.equals("soundcloud") ? "ok" : "no-app";
         }
 
@@ -75,7 +76,7 @@ public final class Main {
             }
         };
         RoomServer server = new RoomServer(files, sample ? new Catalog.Sample() : new Catalog.Live(), lan);
-        if (testPlayer != null) server.setPlayer(new TestPlayer(testPlayer.equals("ready")));
+        if (testPlayer != null) server.setPlayer(new TestPlayer(testPlayer));
         int bound = server.start(port);
         System.out.println("musync is running on port " + bound);
         System.out.println("  on this computer: http://localhost:" + bound + "/");

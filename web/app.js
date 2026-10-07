@@ -489,7 +489,15 @@
   /** On the host's phone: the one step needed before songs can play. */
   function setupCardHTML() {
     const pb = playback();
-    if (!isHost() || !native() || !pb.device || fullMode() || playerKind(pb.app) === 'web') return '';
+    if (!isHost() || !native() || !pb.device || fullMode()) return '';
+    if (pb.status === 'sign-in') {
+      const name = esc(appName(pb.app));
+      return `<div class="card card-step"><b>Sign in to ${name} to start</b>
+        <p>musync plays each song in ${name}’s own web player, kept out of sight, from your account. Sign in once and it stays signed in.</p>
+        <div class="now-actions"><button type="button" class="btn btn-primary" data-show-player="${esc(pb.app)}">Sign in to ${name}</button>
+          <button type="button" class="btn" id="change-app">Use another service</button></div></div>`;
+    }
+    if (playerKind(pb.app) === 'web') return '';
     const app = esc(appName(pb.app));
     if (pb.status === 'no-app') {
       return `<div class="card card-step"><b>${app} isn’t on this phone</b>
@@ -512,7 +520,8 @@
   /** On the host's phone: offer to sign in to a service that is playing signed out. Gone once signed in. */
   function signInCardHTML() {
     const pb = playback();
-    if (!isHost() || !native() || !pb.device) return '';
+    // One request at a time: while a required step is showing, the optional one waits.
+    if (!isHost() || !native() || !pb.device || setupMode()) return '';
     const id = services().find((a) => playerKind(a) === 'web' && webSignedIn(a) === 'out' && !device.skipSignIn.includes(a));
     if (!id) return '';
     const name = esc(appName(id));
@@ -928,14 +937,19 @@
   /** On the host's phone: which services it can play, and signing in to the ones that take an account. */
   function servicesHTML() {
     const list = services();
-    if (!isHost() || !native() || !playback().device || !list.length) return '';
+    if (!isHost() || !native() || !playback().device) return '';
+    // Services this phone could play once the person signs in.
+    const locked = APPS.map((a) => a.id).filter((id) => !list.includes(id) && playerKind(id) === 'web' && webSignedIn(id) === 'out');
+    if (!list.length && !locked.length) return '';
     const rows = list.map((id) => {
       const web = playerKind(id) === 'web', signed = web ? webSignedIn(id) : 'none';
       const state = signed === 'in' ? 'Signed in' : signed === 'out' ? 'Playing signed out' : web ? 'No account needed' : 'Plays in the app on this phone';
       const action = signed === 'out' ? `<button type="button" class="btn btn-sm" data-show-player="${esc(id)}">Sign in</button>`
         : signed === 'in' ? `<button type="button" class="btn btn-sm" data-show-player="${esc(id)}">Open</button>` : '<span></span>';
       return `<li class="service"><div><span class="service-name">${esc(appName(id))}</span><span class="service-state">${state}</span></div>${action}</li>`;
-    }).join('');
+    }).join('') + locked.map((id) => `<li class="service"><div><span class="service-name">${esc(appName(id))}</span>
+        <span class="service-state">Sign in to play ${esc(appName(id))} songs here</span></div>
+        <button type="button" class="btn btn-sm" data-show-player="${esc(id)}">Sign in</button></li>`).join('');
     return `<section class="sheet-section" aria-labelledby="svc-h"><h3 id="svc-h">This phone plays</h3>
       <ul>${rows}</ul>
       <p class="invite-help">A song plays in the service its picker uses when that service is listed here. Otherwise it plays in ${esc(appName(playback().app))}.</p></section>`;

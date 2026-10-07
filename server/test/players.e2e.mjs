@@ -54,6 +54,50 @@ check('player page: a new song replaces the old one', r.playing === '/other/song
 await p.goto(process.argv[3] + 'players/soundcloud.html?track=not-a-track');
 r = JSON.parse(await p.evaluate(sc));
 check('player page: refuses anything that is not a track address', !!r.error, JSON.stringify(r));
+
+// Spotify's web player, as a stand-in page with the same markers the real one uses.
+const spotify = fs.readFileSync(dir + '/spotify.probe.js', 'utf8');
+await p.route('https://open.spotify.com/**', (r) => r.fulfill({ contentType: 'text/html', body: `<main>
+<a href="/artist/0C0XlULifJtAgn6ZNCW2eu">The Killers</a>
+<div data-testid="tracklist-row"><a href="/track/003vvx7Niy0yvhvHt4a68B">Mr. Brightside</a><a href="/artist/x">The Killers</a></div>
+<div data-testid="tracklist-row"><a href="/track/7oK9VyNzrYvRFo7nQEYkWN">Mr. Brightside (live)</a></div>
+<div data-testid="action-bar-row"><button data-testid="play-button" onclick="window.__c.push('song')">Play</button></div></main>
+<footer><div data-testid="now-playing-widget"><a href="/album/4OHNH3sDzIxnmUADXzv2kT?highlight=spotify%3Atrack%3A003vvx7Niy0yvhvHt4a68B">Mr. Brightside</a></div>
+<button data-testid="control-button-playpause" onclick="window.__c.push('toggle')">Play</button>
+<span data-testid="playback-position">0:00</span>
+<div data-testid="playback-progressbar"><input type="range" min="0" max="222075" value="0" oninput="window.__c.push('slide ' + this.value)"></div>
+<span data-testid="playback-duration">3:42</span></footer><script>window.__c = [];</script>` }));
+await p.goto('https://open.spotify.com/search/mr%20brightside%20the%20killers/tracks');
+r = JSON.parse(await p.evaluate(spotify));
+check('Spotify search: lists tracks in order', r.search && r.picks.join() === '003vvx7Niy0yvhvHt4a68B,7oK9VyNzrYvRFo7nQEYkWN' && r.rows === 2, JSON.stringify(r));
+check('Spotify: reads the player bar, and a still clock means paused', r.has && r.paused && r.t === 0 && r.d === 222000 && r.playing === '003vvx7Niy0yvhvHt4a68B' && !r.ad, JSON.stringify(r));
+if (process.argv[4]) {
+  const cmds = Object.fromEntries(fs.readFileSync(process.argv[4], 'utf8').trim().split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  const run = (code) => p.evaluate('(function(){try{' + code + '}catch(e){window.__c.push("error " + e)}})()');
+  await run(cmds.start);
+  check('Spotify: nothing is pressed on a search page', (await p.evaluate(() => window.__c.join())) === '');
+  await p.goto('https://open.spotify.com/track/003vvx7Niy0yvhvHt4a68B');
+  await p.evaluate(spotify);
+  await run(cmds.start); await run(cmds.start);
+  check('Spotify: the song page’s play button is pressed once', (await p.evaluate(() => window.__c.join())) === 'song', await p.evaluate(() => window.__c.join()));
+  await run(cmds.pause);
+  check('Spotify: pause does nothing while nothing is playing', (await p.evaluate(() => window.__c.join())) === 'song');
+  // The clock starts moving: the song is playing.
+  await p.evaluate(() => { document.querySelector('[data-testid="playback-position"]').textContent = '0:01'; });
+  r = JSON.parse(await p.evaluate(spotify));
+  check('Spotify: a moving clock means playing', r.paused === false && r.t === 1000, JSON.stringify(r));
+  await run(cmds.play);
+  check('Spotify: play does nothing while it is playing', (await p.evaluate(() => window.__c.join())) === 'song');
+  await run(cmds.pause);
+  check('Spotify: pause presses the play/pause button', (await p.evaluate(() => window.__c.join())) === 'song,toggle');
+  await run(cmds.seek);
+  check('Spotify: moving through the song sets the slider', /^song,toggle,slide 900\d\d$/.test(await p.evaluate(() => window.__c.join())), await p.evaluate(() => window.__c.join()));
+  await p.evaluate(() => { document.querySelector('[data-testid="now-playing-widget"]').innerHTML = '<span>Advertisement</span>';
+    document.querySelector('[data-testid="playback-position"]').textContent = '0:02'; });
+  r = JSON.parse(await p.evaluate(spotify));
+  check('Spotify: an advert is told apart from a song', r.ad === true, JSON.stringify(r));
+}
+
 await b.close();
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);

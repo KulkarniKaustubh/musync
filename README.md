@@ -15,14 +15,16 @@ One shared music queue that everyone in the room adds to from their own phone.
   Tidal, Amazon Music, Deezer or SoundCloud), from the host's own account, and
   moves to the next song when it ends. Pause and skip in musync control that
   app. See "Whole songs" below for the one-time setup.
-- **YouTube Music and SoundCloud play inside musync (0.5.0).** For these two
-  the app loads the service's own web player in a hidden web view, finds each
+- **YouTube Music, SoundCloud and Spotify play inside musync.** For these the
+  app loads the service's own web player in a hidden web view, finds each
   song by title and artist, plays it, and moves on when it ends. No other app
   opens and no permission is needed. YouTube Music can be signed in to from
-  the room screen; SoundCloud needs no account. YouTube Music is confirmed on
-  a phone; SoundCloud is not yet. This drives other companies' websites by
-  script: it is against their terms, fine only for private use, and will break
-  when a site changes.
+  the room screen; SoundCloud needs no account; Spotify only plays once
+  signed in. YouTube Music and SoundCloud are confirmed on a phone. Spotify
+  (0.6.0) is not yet: its player hides its audio, so musync presses its
+  buttons and reads its clock, which is the most fragile of the three. This
+  drives other companies' websites by script: it is against their terms, fine
+  only for private use, and will break when a site changes.
 - **Each song plays in its picker's service.** A song plays in the service the
   person who added it uses, when the host's phone can play that service;
   otherwise in the host's. When the phone can play more than one, the search
@@ -131,6 +133,8 @@ node test/rooms.e2e.mjs        # needs Playwright; drives a host and two guests
 list the servers they need at the top of each file. `test/players.e2e.mjs`
 checks the scripts that read the services' web players, against stand-in
 pages: `node test/players.e2e.mjs ../web/players http://localhost:8801/`.
+A third argument, a file of the Spotify control scripts dumped from the
+Android build, also checks which buttons they press.
 
 ## What is where
 
