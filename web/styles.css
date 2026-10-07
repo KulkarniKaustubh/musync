@@ -300,12 +300,19 @@ svg { display: block; }
 .now .progress-times { color: var(--text-2); }
 .now .progress-track { background: var(--layer-2); background: color-mix(in oklab, var(--text) 16%, transparent); }
 .now-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.now-actions .btn { background: var(--layer-2); background: color-mix(in oklab, var(--text) 12%, transparent); }
-.now-actions .btn:hover:not(:disabled) { background: color-mix(in oklab, var(--text) 20%, transparent); }
+/* Primary buttons keep the accent fill; only the quiet ones take the tinted surface. */
+.now-actions .btn:not(.btn-primary) { background: var(--layer-2); background: color-mix(in oklab, var(--text) 12%, transparent); }
+.now-actions .btn:not(.btn-primary):hover:not(:disabled) { background: color-mix(in oklab, var(--text) 20%, transparent); }
 
 .card { display: grid; gap: 10px; justify-items: start; padding: 16px; border-radius: var(--r-lg); background: var(--layer-1); color: var(--text-2); font-size: var(--t-sm); }
 .card b { color: var(--text); font-size: var(--t-base); font-weight: 800; }
 .card-help { color: var(--text-3); }
+.card-step { margin-bottom: 12px; padding: 18px; gap: 12px; font-size: var(--t-base); }
+.card-step > b { font-size: var(--t-lg, 1.25rem); }
+.card-step .card-help { font-size: var(--t-sm); }
+.howto { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; color: var(--text); list-style: decimal; }
+.howto li { display: list-item; }
+.howto b { display: inline; font-size: inherit; }
 .now-note { display: grid; gap: 8px; font-size: var(--t-sm); }
 .now-note p { color: var(--text); font-weight: 600; }
 .empty { display: grid; gap: 4px; justify-items: start; padding: 20px 16px; border-radius: var(--r-lg); background: var(--layer-1); color: var(--text-2); }

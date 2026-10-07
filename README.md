@@ -17,8 +17,13 @@ One shared music queue that everyone in the room adds to from their own phone.
   app. See "Whole songs" below for the one-time setup.
 - **Your own app.** Each person picks the music app they use. Guests get
   "Open in Spotify" (or their app) to hear a song on their own phone.
-- **Previews as a fallback.** Until the host allows access, or when the room is
-  hosted from a browser, the host's device plays each song's 30-second preview.
+- **No previews on the phone app.** Until the host allows access, the song
+  waits and the app shows the one step that is left. 30-second previews are
+  only used when a room is hosted from a browser on the standalone server.
+- **One search.** Search does not ask which service to look in. It uses a
+  neutral song list (Apple's and Deezer's public catalogs) and the song then
+  plays in the host's music app. Spotify and YouTube Music do not offer a
+  search that a new app may use.
 - **Queue rules.** Anyone can add and bump. The host can pause, skip and remove
   any song. You can skip or remove your own. If the host leaves, the person who
   has been there longest becomes host.

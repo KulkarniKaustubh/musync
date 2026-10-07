@@ -227,6 +227,16 @@ public final class Room {
 
     public synchronized boolean isFull() { return full(); }
 
+    /** The host's phone can play whole songs, so the room never falls back to 30-second previews. */
+    private boolean device() {
+        return player != null && hostId != null && hostId.equals(playerOwner);
+    }
+
+    /** The host's phone is the player but is not set up yet: the song waits instead of playing a preview. */
+    private boolean waiting() {
+        return device() && !playerReady;
+    }
+
     public synchronized String hostApp() {
         for (Member m : byToken.values()) if (m.id.equals(hostId)) return m.app;
         return "";
@@ -240,7 +250,7 @@ public final class Room {
         playerDetail = detail == null ? "" : detail;
         if (full() != was && now != null) {
             // Switching between previews and whole songs: the current song starts over.
-            durationMs = full() ? fullLength(now) : DEFAULT_MS;
+            durationMs = device() ? fullLength(now) : DEFAULT_MS;
             startedAt = System.currentTimeMillis();
             pausedAtMs = 0;
             paused = false;
@@ -305,7 +315,7 @@ public final class Room {
     /** The host's player says the current song finished. */
     public synchronized void ended(String token, String key) throws Denied {
         Member m = member(token);
-        if (full()) return; // the device player decides when whole songs end
+        if (device()) return; // the device player decides when whole songs end
         if (!m.id.equals(hostId) || now == null || !now.key.equals(key)) return;
         next();
         changed();
@@ -314,7 +324,7 @@ public final class Room {
     /** The host's player reports how long the clip really is. */
     public synchronized void duration(String token, String key, long ms) throws Denied {
         Member m = member(token);
-        if (full()) return;
+        if (device()) return;
         if (!m.id.equals(hostId) || now == null || !now.key.equals(key)) return;
         if (ms < 1000 || ms > 900000 || Math.abs(ms - durationMs) < 500) return;
         durationMs = ms;
@@ -334,7 +344,7 @@ public final class Room {
 
     /** Called about once a second: moves on when a song has run its length and nobody reported the end. */
     public synchronized void tick() {
-        if (now == null || paused) return;
+        if (now == null || paused || waiting()) return;
         // With a device player the end normally comes from it; this is the safety net.
         long grace = full() ? 20000 : 2500;
         if (System.currentTimeMillis() - startedAt > durationMs + grace) {
@@ -346,7 +356,7 @@ public final class Room {
     private void start(Entry e) {
         now = e;
         paused = false;
-        durationMs = full() ? fullLength(e) : DEFAULT_MS;
+        durationMs = device() ? fullLength(e) : DEFAULT_MS;
         startedAt = System.currentTimeMillis();
         pausedAtMs = 0;
     }
@@ -393,12 +403,12 @@ public final class Room {
         if (now != null) {
             Map<String, Object> n = entry(now);
             n.put("paused", paused);
-            n.put("position", paused ? pausedAtMs : Math.max(0, Math.min(durationMs, t - startedAt)));
+            n.put("position", waiting() ? 0 : paused ? pausedAtMs : Math.max(0, Math.min(durationMs, t - startedAt)));
             n.put("duration", durationMs);
             playing = n;
         }
-        Map<String, Object> playback = Json.map("mode", full() ? "full" : "preview", "app", hostApp(),
-                "device", player != null && hostId != null && hostId.equals(playerOwner),
+        Map<String, Object> playback = Json.map("mode", full() ? "full" : device() ? "setup" : "preview", "app", hostApp(),
+                "device", device(),
                 "status", playerStatus, "detail", playerDetail);
         return Json.map("code", code, "hostId", hostId, "people", people, "now", playing, "queue", q,
                 "playback", playback, "serverTime", t);

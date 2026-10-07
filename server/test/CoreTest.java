@@ -116,8 +116,13 @@ public class CoreTest {
         f.setPlayer(fake, owner);
         List<Map<String, Object>> list = new Catalog.Sample().search("e", "apple", "US").songs;
         f.add("friend-token-0123456789", list.get(0));
-        check("without access the room stays on previews", "preview".equals(Json.obj(f.state().get("playback")).get("mode")));
-        check("in preview mode the player is told to stay silent", calls.size() > 0 && calls.get(calls.size() - 1).startsWith("silence"));
+        check("without access the room waits for setup instead of playing previews", "setup".equals(Json.obj(f.state().get("playback")).get("mode")));
+        check("while waiting the player is told to stay silent", calls.size() > 0 && calls.get(calls.size() - 1).startsWith("silence"));
+        String waitKey = Json.str(Json.obj(f.state().get("now")).get("key"));
+        f.ended("owner-token-0123456789", waitKey);
+        f.tick();
+        check("while waiting the song is held at the start",
+            waitKey.equals(Json.str(Json.obj(f.state().get("now")).get("key"))) && Json.num(Json.obj(f.state().get("now")).get("position")) == 0);
         f.playerMode(true, "ok", "");
         check("once the device is ready the room switches to whole songs", "full".equals(Json.obj(f.state().get("playback")).get("mode")));
         check("the player is asked to play the current song in the host's app", calls.get(calls.size() - 1).equals(list.get(0).get("title") + "/playing/spotify"));

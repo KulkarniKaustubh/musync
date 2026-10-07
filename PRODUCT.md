@@ -67,7 +67,8 @@ Built in version 0.3 (see README for what is tested):
 - Search comes from Apple's and Deezer's public catalogs.
 - The host's phone is the speaker. It plays whole songs by driving the host's
   own music app through Android's media controls, from the host's account.
-  30-second previews are the fallback when that is not set up.
+  Until that is set up the song waits; the phone app never plays previews.
+  Previews exist only for rooms hosted from a browser.
 - Guests open a song in their own app to hear it on their own phone.
 - Anyone can add and bump; the host can pause, skip and remove any song; a
   person can skip or remove their own. These rules were chosen to get a working

@@ -76,13 +76,16 @@
   const nameOf = (id) => (person(id) || {}).name || 'Someone';
   const colorOf = (id) => (person(id) || {}).color || 'sky';
   const isHost = () => !!ui.room && ui.room.hostId === ui.me;
-  const isPlayer = () => !fullMode() && (isHost() || ui.listening);
+  const isPlayer = () => playback().mode === 'preview' && (isHost() || ui.listening);
   const pickLabel = (id) => (id === ui.me ? 'Your pick' : nameOf(id) + '’s pick');
   const myApp = () => (person(ui.me) || {}).app || device.app || 'spotify';
   // How the room makes sound: "full" means the host's phone plays whole songs in
-  // the host's own music app; "preview" means 30-second clips in the browser.
+  // the host's own music app; "setup" means that phone can, once the host has
+  // allowed it, and the song waits until then; "preview" means 30-second clips
+  // in the browser, used only when the room is not hosted from the phone app.
   const playback = () => (ui.room && ui.room.playback) || { mode: 'preview', app: '', device: false, status: '', detail: '' };
   const fullMode = () => playback().mode === 'full';
+  const setupMode = () => playback().mode === 'setup';
   const native = () => window.MusyncNative || null;
 
   // ---------- server ----------
@@ -403,8 +406,8 @@
       <div class="room-grid">
         <section class="room-col room-col-now" aria-labelledby="now-h">
           <div class="section-head"><h2 id="now-h" data-slot="nowhead"></h2></div>
-          <div data-slot="now"></div>
           <div data-slot="setup"></div>
+          <div data-slot="now"></div>
         </section>
         <section class="room-col" aria-labelledby="next-h">
           <div class="addbar"><button type="button" class="addbar-btn" id="open-search">${ICON.search}<span>Add a song</span></button></div>
@@ -440,7 +443,11 @@
 
   const eq = (on) => `<span class="eq${on ? ' is-on' : ''}" aria-hidden="true"><i></i><i></i><i></i></span>`;
   function sourceLine(song) {
-    if (!fullMode()) return '30-second preview from ' + (CATALOGS[song.src] || 'the catalog');
+    if (setupMode()) {
+      if (isHost()) return 'Waiting for the step below';
+      return `Starts when ${nameOf(ui.room.hostId)} finishes setting up`;
+    }
+    if (!fullMode()) return '30-second preview';
     const whose = isHost() ? 'your' : nameOf(ui.room.hostId) + '’s';
     return `Playing in ${whose} ${appName(playback().app)}`;
   }
@@ -457,21 +464,26 @@
     return `<div class="now-note"><p>${esc(pb.detail)}</p>${action ? `<div class="now-actions">${action}</div>` : ''}</div>`;
   }
 
-  /** On the host's phone: how to switch from previews to whole songs. */
+  /** On the host's phone: the one step needed before songs can play. */
   function setupCardHTML() {
     const pb = playback();
     if (!isHost() || !native() || !pb.device || fullMode()) return '';
     const app = esc(appName(pb.app));
     if (pb.status === 'no-app') {
-      return `<div class="card"><b>${app} isn’t on this phone</b>
-        <p>The room is playing 30-second previews. To play whole songs, install ${app} or pick the music app you have.</p>
-        <div class="now-actions"><button type="button" class="btn btn-sm" id="change-app">Change app</button></div></div>`;
+      return `<div class="card card-step"><b>${app} isn’t on this phone</b>
+        <p>musync plays each song in your own music app. Install ${app}, or pick the music app you have.</p>
+        <div class="now-actions"><button type="button" class="btn btn-primary" id="change-app">Change app</button></div></div>`;
     }
-    return `<div class="card"><b>Play whole songs in ${app}</b>
-      <p>The room is playing 30-second previews. musync can start each song in your ${app} app instead, from your own account.</p>
-      <p>Android asks for “notification access” before one app may control another’s playback. musync uses it only for that and does not read your notifications.</p>
-      <div class="now-actions"><button type="button" class="btn btn-sm btn-primary" id="grant-access">Allow access</button></div>
-      <p class="card-help">If Android says the setting is restricted: open musync’s settings, tap the three dots at the top, then “Allow restricted settings”, and try again.</p>
+    return `<div class="card card-step"><b>One step before the music plays</b>
+      <p>musync plays whole songs in your ${app} app, from your own account. Android needs your permission before one app may control another’s playback.</p>
+      <ol class="howto">
+        <li>Tap <b>Allow access</b>.</li>
+        <li>Find <b>musync</b> in the list and switch it on.</li>
+        <li>Come back here. The song starts by itself.</li>
+      </ol>
+      <div class="now-actions"><button type="button" class="btn btn-primary" id="grant-access">Allow access</button></div>
+      <p class="card-help">Android calls this “notification access”. musync does not read your notifications.</p>
+      <p class="card-help">If the switch is greyed out or Android says the setting is restricted: tap the button below, tap the three dots at the top right, tap “Allow restricted settings”, then tap Allow access again.</p>
       <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open musync’s settings</button></div></div>`;
   }
 
@@ -482,7 +494,7 @@
       return `<div class="tv-cover">${cover(n.song, true)}</div>
         <div><p class="tv-label">${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}</p>
           <h1 class="tv-title">${esc(n.song.title)}</h1><p class="tv-artist">${esc(n.song.artist)}</p></div>
-        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second').replace('Playing in', 'playing in'))}</span></p>
+        <p class="tv-pick">${avatar(n.by)}<span><b>${esc(pickLabel(n.by))}</b>, ${esc(sourceLine(n.song).replace('30-second', 'a 30-second').replace('Playing in', 'playing in').replace('Waiting', 'waiting').replace('Starts', 'starts'))}</span></p>
         ${progressHTML()}`;
     }
     if (!n) return '<div class="empty"><b>Nothing is playing</b>The room starts when someone adds a song.</div>';
@@ -490,10 +502,11 @@
     const app = myApp();
     const actions = [];
     if (ui.needsTap && isPlayer()) actions.push(`<button type="button" class="btn btn-sm btn-primary" id="tap-sound">${ICON.sound}Turn sound on</button>`);
-    if (isHost()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
+    if (isHost() && !setupMode()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-play">${n.paused ? ICON.play + 'Play' : ICON.pause + 'Pause'}</button>`);
     if (isHost() || mine) actions.push(`<button type="button" class="btn btn-sm" id="skip">${ICON.skip}${mine && !isHost() ? 'Skip my song' : 'Skip'}</button>`);
-    if (!isHost() && !fullMode()) actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
-    actions.push(`<button type="button" class="btn btn-sm" id="open-full" data-key="${n.key}">${ICON.open}Open in ${esc(appName(app))}</button>`);
+    if (!isHost() && playback().mode === 'preview') actions.push(`<button type="button" class="btn btn-sm" id="toggle-listen" aria-pressed="${ui.listening}">${ICON.sound}${ui.listening ? 'Sound is on' : 'Listen on this device'}</button>`);
+    // The host's phone plays the song itself; sending the host to another app would be a detour.
+    if (!(isHost() && playback().device)) actions.push(`<button type="button" class="btn btn-sm" id="open-full" data-key="${n.key}">${ICON.open}Open in ${esc(appName(app))}</button>`);
     return `<div class="now" style="--tint: hsl(${hueOf(n.song)} 44% 36%)">
       <div class="now-top">${cover(n.song, true)}
         <div><h3 class="now-title">${esc(n.song.title)}</h3><p class="now-artist">${esc(n.song.artist)}</p></div></div>
@@ -523,7 +536,7 @@
     }
     return `<li class="row${ui.justAdded === e.song.ref ? ' is-new' : ''}" data-key="${e.key}">${cover(e.song)}
       <div class="row-main"><span class="row-title">${title}</span><span class="row-artist">${esc(e.song.artist)}</span>
-        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b><span>${esc(CATALOGS[e.song.src] || '')}</span></span></div>
+        <span class="row-pick">${avatar(e.by, 'avatar-sm')}<b>${esc(mine ? 'You' : nameOf(e.by))}</b></span></div>
       ${side}</li>`;
   }
 
@@ -581,7 +594,7 @@
     slot('count').textContent = ui.room.queue.length ? plural(ui.room.queue.length, 'song') : '';
     if (ui.view === 'room') {
       const n = ui.room.now;
-      slot('nowhead').innerHTML = n ? `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}` : 'Now playing';
+      slot('nowhead').innerHTML = !n ? 'Now playing' : setupMode() ? 'Ready to play' : `${n.paused ? 'Paused' : 'Now playing'}${eq(!n.paused)}`;
       slot('people').innerHTML = peopleBtnHTML();
       slot('roomname').textContent = isHost() ? 'Your room' : nameOf(ui.room.hostId) + '’s room';
       slot('code').textContent = roomCode();
@@ -608,7 +621,7 @@
   /** Where the song is right now, from the server's clock. */
   function position() {
     const n = ui.room && ui.room.now;
-    if (!n) return 0;
+    if (!n || setupMode()) return 0;
     return Math.min(n.duration, n.paused ? n.position : n.position + (Date.now() - ui.receivedAt));
   }
 
@@ -720,11 +733,9 @@
   $('.searchbox-icon').innerHTML = ICON.search;
   let searchTimer, searchAbort;
 
-  function renderChips() {
-    const chips = [['all', 'All'], ['apple', 'Apple Music'], ['deezer', 'Deezer']];
-    $('#scope-chips').innerHTML = chips.map(([id, label]) =>
-      `<button type="button" class="chip" data-scope="${id}" aria-pressed="${ui.scope === id}">${esc(label)}</button>`).join('');
-  }
+  // Search uses one neutral song index. Which service it comes from does not
+  // matter to the person: the song plays in their room's music app either way.
+  function renderChips() { $('#scope-chips').hidden = true; }
 
   function queueSearch(now) {
     const q = input.value.trim();
@@ -752,10 +763,8 @@
 
   function renderResults() {
     const s = ui.search, note = $('#search-note');
-    const scopeLabel = ui.scope === 'all' ? 'Apple Music and Deezer' : CATALOGS[ui.scope];
-    input.placeholder = 'Search ' + scopeLabel;
-    note.textContent = s.failed.length && !s.loading
-      ? `${s.failed.map((f) => CATALOGS[f] || f).join(' and ')} didn’t respond. Showing the rest.` : '';
+    input.placeholder = 'Songs or artists';
+    note.textContent = s.failed.length && !s.loading && s.songs.length ? 'Some results may be missing. Try again in a moment.' : '';
 
     if (s.loading) {
       results.innerHTML = Array.from({ length: 6 }, () => '<li class="skel" aria-hidden="true"><i></i><div><i></i><i></i></div></li>').join('');
@@ -767,13 +776,12 @@
       return;
     }
     if (s.q.length < 2) {
-      results.innerHTML = `<li class="results-note"><b>Find a song</b>Search by song or artist. Results come from ${esc(scopeLabel)}.
-        ${fullMode() ? `The host’s phone plays the whole song in ${esc(appName(playback().app))}.` : `The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.`}</li>`;
+      results.innerHTML = `<li class="results-note"><b>Find a song</b>Search by song or artist.
+        ${playback().device ? `It plays in full in ${esc(isHost() ? 'your' : nameOf(ui.room.hostId) + '’s')} ${esc(appName(playback().app))}.` : `The room plays a 30-second preview; open the full song in ${esc(appName(myApp()))} any time.`}</li>`;
       return;
     }
     if (!s.songs.length) {
-      results.innerHTML = `<li class="results-note"><b>No results for “${esc(s.q)}”</b>Check the spelling, or try the artist’s name.
-        ${ui.scope !== 'all' ? '<br><button type="button" class="btn btn-sm" data-scope="all">Search both catalogs</button>' : ''}</li>`;
+      results.innerHTML = `<li class="results-note"><b>No results for “${esc(s.q)}”</b>Check the spelling, or try the artist’s name.</li>`;
       return;
     }
     // The two catalogs often both have a song. Show it once, and treat either
@@ -788,7 +796,7 @@
       if (inRoom.has(same(song))) action = `<span class="added">${ICON.check}In queue</span>`;
       else if (ui.adding.has(song.ref)) action = '<button type="button" class="btn btn-sm is-busy" disabled>Adding</button>';
       else action = `<button type="button" class="btn btn-primary btn-sm" data-add="${esc(song.ref)}" aria-label="Add ${esc(song.title)} by ${esc(song.artist)}">Add</button>`;
-      const where = [song.album, ui.scope === 'all' ? CATALOGS[song.src] : ''].filter(Boolean).join(', ');
+      const where = song.album || '';
       return `<li class="row">${cover(song)}
         <div class="row-main"><span class="row-title">${esc(song.title)}</span><span class="row-artist">${esc(song.artist)}</span>
           ${where ? `<span class="result-where">${esc(where)}</span>` : ''}</div>
@@ -797,8 +805,7 @@
   }
 
   function openSearch() {
-    const mine = myApp();
-    ui.scope = CATALOGS[mine] ? mine : 'all';
+    ui.scope = 'all';
     input.value = '';
     ui.search = { q: '', loading: false, songs: [], failed: [], error: '' };
     renderChips();
@@ -814,7 +821,7 @@
       const wasEmpty = !ui.room.now;
       await api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'add', ref });
       ui.justAdded = ref;
-      toast(wasEmpty ? 'Playing now' : 'Added to the queue');
+      toast(wasEmpty && !setupMode() ? 'Playing now' : 'Added to the queue');
     } catch (e) {
       toast(e.message);
     }
