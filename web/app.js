@@ -87,6 +87,12 @@
   const fullMode = () => playback().mode === 'full';
   const setupMode = () => playback().mode === 'setup';
   const native = () => window.MusyncNative || null;
+  // On the host's phone some music apps play in a web player built into musync
+  // ("web"); the rest are driven as installed apps ("app").
+  const playerKind = (appId) => {
+    const n = native();
+    try { return n && n.playerKind ? n.playerKind(appId) : 'app'; } catch (_) { return 'app'; }
+  };
 
   // ---------- server ----------
 
@@ -408,6 +414,7 @@
           <div class="section-head"><h2 id="now-h" data-slot="nowhead"></h2></div>
           <div data-slot="setup"></div>
           <div data-slot="now"></div>
+          <div data-slot="after"></div>
         </section>
         <section class="room-col" aria-labelledby="next-h">
           <div class="addbar"><button type="button" class="addbar-btn" id="open-search">${ICON.search}<span>Add a song</span></button></div>
@@ -463,6 +470,7 @@
     if (isHost() && native()) {
       if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app">Open ${esc(appName(pb.app))}</button>`;
       if (pb.status === 'failed' || pb.status === 'needs-open') action += '<button type="button" class="btn btn-sm" id="retry-play">Try again</button>';
+      if (pb.status === 'failed' && playerKind(pb.app) === 'web') action += `<button type="button" class="btn btn-sm" id="show-web-player">Show ${esc(appName(pb.app))}</button>`;
     }
     return `<div class="now-note"><p>${esc(pb.detail)}</p>${action ? `<div class="now-actions">${action}</div>` : ''}</div>`;
   }
@@ -470,7 +478,7 @@
   /** On the host's phone: the one step needed before songs can play. */
   function setupCardHTML() {
     const pb = playback();
-    if (!isHost() || !native() || !pb.device || fullMode()) return '';
+    if (!isHost() || !native() || !pb.device || fullMode() || playerKind(pb.app) === 'web') return '';
     const app = esc(appName(pb.app));
     if (pb.status === 'no-app') {
       return `<div class="card card-step"><b>${app} isn’t on this phone</b>
@@ -488,6 +496,16 @@
       <p class="card-help">Android calls this “notification access”. musync does not read your notifications.</p>
       <p class="card-help">If the switch is greyed out or Android says the setting is restricted: tap the button below, tap the three dots at the top right, tap “Allow restricted settings”, then tap Allow access again.</p>
       <div class="now-actions"><button type="button" class="btn btn-sm" id="open-app-settings">Open musync’s settings</button></div></div>`;
+  }
+
+  /** On the host's phone, when the music plays in the web player built into musync. */
+  function webPlayerCardHTML() {
+    const pb = playback();
+    if (!isHost() || !native() || !pb.device || playerKind(pb.app) !== 'web') return '';
+    const app = esc(appName(pb.app));
+    return `<div class="card"><b>${app} plays inside musync</b>
+      <p>Songs play from ${app}’s website, kept out of sight. Sign in there to play from your own account. Keep musync on screen while the room is playing.</p>
+      <div class="now-actions"><button type="button" class="btn btn-sm" id="show-web-player">Open ${app} to sign in</button></div></div>`;
   }
 
   function nowHTML() {
@@ -603,6 +621,8 @@
       slot('code').textContent = roomCode();
       const card = setupCardHTML();
       if (slot('setup').innerHTML !== card) slot('setup').innerHTML = card;
+      const after = webPlayerCardHTML();
+      if (slot('after').innerHTML !== after) slot('after').innerHTML = after;
     }
     paintProgress(true);
 
@@ -986,6 +1006,7 @@
     }
     if (t.id === 'tap-sound') { ui.needsTap = false; player.play().catch(() => {}); syncPlayer(); return refresh(true); }
     if (t.id === 'grant-access') return native() && native().requestMediaAccess();
+    if (t.id === 'show-web-player') return native() && native().showWebPlayer && native().showWebPlayer();
     if (t.id === 'open-app-settings') return native() && native().openAppSettings();
     if (t.id === 'open-music-app') return native() && native().openApp(playback().app);
     if (t.id === 'retry-play') return act('retry').catch(() => {});

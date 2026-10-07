@@ -15,6 +15,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -23,6 +26,9 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import app.musync.core.Catalog;
 import app.musync.core.RoomServer;
@@ -44,7 +50,10 @@ import java.util.List;
  */
 public class MainActivity extends Activity {
     private static RoomServer server; // one per process, survives screen rotation
-    private static AppPlayer player;
+    private static HostPlayer player;
+    private FrameLayout root;
+    private LinearLayout playerPanel;
+    private boolean playerShown;
     private static int port;
     private WebView web;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -66,9 +75,14 @@ public class MainActivity extends Activity {
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
         web.addJavascriptInterface(new Bridge(), "MusyncNative");
         web.setWebViewClient(new Client());
-        setContentView(web);
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.parseColor("#101011"));
+        setContentView(root);
 
         String problem = startServer();
+        buildPlayerPanel();
+        root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         if (problem != null) {
             web.loadData("<body style='background:#101011;color:#f4f4f5;font:16px sans-serif;padding:24px'>"
                     + "<h2>musync couldn’t start</h2><p>" + problem + "</p><p>Close other copies of musync and open it again.</p>",
@@ -94,7 +108,7 @@ public class MainActivity extends Activity {
                 public List<String> addresses() { return wifiAddresses(app); }
             });
             final RoomServer s = new RoomServer(files, new Catalog.Live(), true);
-            player = new AppPlayer(app);
+            player = new HostPlayer(new AppPlayer(app), new WebPlayer(app));
             s.setPlayer(player);
             // Opening the port happens off the main thread, which Android reserves for the screen.
             final int[] bound = {-1};
@@ -146,14 +160,14 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (player != null) {
-            player.setForeground(true);
+            player.apps.setForeground(true);
             player.recheck(); // the user may be coming back from granting access
         }
     }
 
     @Override
     protected void onPause() {
-        if (player != null) player.setForeground(false);
+        if (player != null) player.apps.setForeground(false);
         super.onPause();
     }
 
@@ -170,6 +184,8 @@ public class MainActivity extends Activity {
                 if (server != null) { server.stop(); server = null; }
             }
         }
+        // The web player outlives this screen; only let go of it here.
+        if (player != null && playerPanel != null) playerPanel.removeView(player.web.view());
         web.destroy();
         super.onDestroy();
     }
@@ -177,12 +193,54 @@ public class MainActivity extends Activity {
     /** Back closes a sheet or steps back inside the app; from the start screen it sends the app to the background. */
     @Override
     public void onBackPressed() {
+        if (playerShown) { showPlayer(false); return; }
         web.evaluateJavascript("window.musyncBack ? window.musyncBack() : '0'", new ValueCallback<String>() {
             @Override
             public void onReceiveValue(String value) {
                 if (value == null || !value.contains("1")) moveTaskToBack(true);
             }
         });
+    }
+
+    /**
+     * The music service's web player sits in a panel behind musync's own screen.
+     * It keeps playing there; bringing the panel to the front is only for signing in
+     * or looking at what it is doing.
+     */
+    private void buildPlayerPanel() {
+        if (player == null) return;
+        float dp = getResources().getDisplayMetrics().density;
+        playerPanel = new LinearLayout(this);
+        playerPanel.setOrientation(LinearLayout.VERTICAL);
+        playerPanel.setBackgroundColor(Color.parseColor("#101011"));
+        TextView back = new TextView(this);
+        back.setText("\u2039  Back to musync");
+        back.setTextColor(Color.parseColor("#1A1606"));
+        back.setBackgroundColor(Color.parseColor("#FFD23F"));
+        back.setTextSize(16);
+        back.setGravity(Gravity.CENTER_VERTICAL);
+        back.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
+        back.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showPlayer(false); }
+        });
+        playerPanel.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (52 * dp)));
+        WebView pv = player.web.view();
+        if (pv.getParent() instanceof ViewGroup) ((ViewGroup) pv.getParent()).removeView(pv);
+        playerPanel.addView(pv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(playerPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showPlayer(boolean show) {
+        if (playerPanel == null) return;
+        playerShown = show;
+        if (show) {
+            player.web.ensureLoaded();
+            playerPanel.bringToFront();
+        } else {
+            web.bringToFront();
+        }
+        root.requestLayout();
+        root.invalidate();
     }
 
     /** What the web client may ask the app to do. */
@@ -198,6 +256,18 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
                 // no app can open it; nothing to do
             }
+        }
+
+        /** "web" when musync plays this music app's songs in its own built-in web player, otherwise "app". */
+        @JavascriptInterface
+        public String playerKind(String appId) {
+            return HostPlayer.usesWeb(appId) ? "web" : "app";
+        }
+
+        /** Brings the built-in web player to the front, for signing in. */
+        @JavascriptInterface
+        public void showWebPlayer() {
+            runOnUiThread(new Runnable() { public void run() { showPlayer(true); } });
         }
 
         /** "granted" once musync may control music playback, otherwise "missing". */

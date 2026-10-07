@@ -15,6 +15,13 @@ One shared music queue that everyone in the room adds to from their own phone.
   Tidal, Amazon Music, Deezer or SoundCloud), from the host's own account, and
   moves to the next song when it ends. Pause and skip in musync control that
   app. See "Whole songs" below for the one-time setup.
+- **YouTube Music plays inside musync (experimental, 0.4.0).** When the host
+  picks YouTube Music, the app loads YouTube Music's website in a hidden web
+  view, finds each song there by title and artist, plays it, and moves on when
+  it ends. No other app opens and no permission is needed. "Open YouTube Music
+  to sign in" shows that web view. This drives someone else's website by
+  script: it is against YouTube's terms, fine only for private use, and will
+  break when the site changes. Not yet confirmed on a phone.
 - **Your own app.** Each person picks the music app they use. Guests get
   "Open in Spotify" (or their app) to hear a song on their own phone.
 - **No previews on the phone app.** Until the host allows access, the song

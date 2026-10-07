@@ -307,6 +307,7 @@ svg { display: block; }
 .card { display: grid; gap: 10px; justify-items: start; padding: 16px; border-radius: var(--r-lg); background: var(--layer-1); color: var(--text-2); font-size: var(--t-sm); }
 .card b { color: var(--text); font-size: var(--t-base); font-weight: 800; }
 .card-help { color: var(--text-3); }
+[data-slot="after"] .card { margin-top: 12px; }
 .card-step { margin-bottom: 12px; padding: 18px; gap: 12px; font-size: var(--t-base); }
 .card-step > b { font-size: var(--t-lg, 1.25rem); }
 .card-step .card-help { font-size: var(--t-sm); }

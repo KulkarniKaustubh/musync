@@ -112,6 +112,19 @@ final class AppPlayer implements Room.Player {
         h.post(new Runnable() { public void run() { checkMode(); } });
     }
 
+    /** Stops the sound and forgets the room; used when the host switches to the built-in web player. */
+    void stop() {
+        h.post(new Runnable() { public void run() {
+            if (key != null || phase != IDLE) pauseApp();
+            dropController();
+            key = null;
+            song = null;
+            phase = IDLE;
+            room = null;
+            app = "\u0000"; // not a real app, so the next real choice is treated as a change
+        } });
+    }
+
     @Override
     public void apply(final Room r, final String k, final Map<String, Object> s, final boolean p, final String a, final boolean force) {
         h.post(new Runnable() { public void run() { handle(r, k, s, p, a, force); } });
