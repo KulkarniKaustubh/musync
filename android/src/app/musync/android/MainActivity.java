@@ -32,6 +32,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import app.musync.core.Catalog;
+import app.musync.core.Json;
 import app.musync.core.RoomServer;
 
 import java.io.IOException;
@@ -40,6 +41,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The musync Android app.
@@ -56,6 +58,10 @@ public class MainActivity extends Activity {
     private LinearLayout playerPanel;
     private FrameLayout playerStack;
     private TextView playerBack;
+    private LinearLayout browsePanel;
+    private TextView browseBack;
+    private LibraryBrowser browser;
+    private boolean browseShown;
     private boolean playerShown;
     private static boolean askedNotifications;
     private static int port;
@@ -85,6 +91,7 @@ public class MainActivity extends Activity {
 
         String problem = startServer();
         buildPlayerPanel();
+        buildBrowsePanel();
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         if (problem != null) {
@@ -92,7 +99,8 @@ public class MainActivity extends Activity {
                     + "<h2>musync couldn’t start</h2><p>" + problem + "</p><p>Close other copies of musync and open it again.</p>",
                     "text/html; charset=utf-8", "utf-8");
         } else if (saved == null) {
-            web.loadUrl(home());
+            String room = roomFrom(getIntent());
+            web.loadUrl(room != null ? room : home());
         } else {
             web.restoreState(saved);
         }
@@ -161,6 +169,38 @@ public class MainActivity extends Activity {
         return "http://127.0.0.1:" + port + "/";
     }
 
+    /** Another app or a link ("musync://join?...") asks to open a room in this app. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String room = roomFrom(intent);
+        if (room != null && web != null) {
+            if (browseShown) showBrowser(null);
+            if (playerShown) showPlayer(null);
+            web.loadUrl(room);
+        }
+    }
+
+    /**
+     * The room address in a "musync://join?url=...&code=..." link, or null. Only a phone
+     * on a home or office network is accepted (a plain address like 192.168.1.23:8787),
+     * so a link cannot point this app at an arbitrary website.
+     */
+    static String roomFrom(Intent intent) {
+        Uri d = intent == null ? null : intent.getData();
+        if (d == null || !"musync".equals(d.getScheme())) return null;
+        try {
+            String url = d.getQueryParameter("url"), code = d.getQueryParameter("code");
+            if (url == null || code == null) return null;
+            if (!url.matches("http://(10\\.\\d{1,3}|192\\.168|172\\.(1[6-9]|2\\d|3[01]))\\.\\d{1,3}\\.\\d{1,3}:\\d{2,5}/?")) return null;
+            if (!code.matches("[A-Za-z0-9]{4}")) return null;
+            return (url.endsWith("/") ? url : url + "/") + "#join=" + code.toUpperCase(java.util.Locale.ROOT);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -192,6 +232,7 @@ public class MainActivity extends Activity {
         }
         // The web players outlive this screen; only let go of them here.
         if (playerStack != null) playerStack.removeAllViews();
+        if (browser != null) browser.destroy();
         web.destroy();
         super.onDestroy();
     }
@@ -199,6 +240,7 @@ public class MainActivity extends Activity {
     /** Back closes a sheet or steps back inside the app; from the start screen it sends the app to the background. */
     @Override
     public void onBackPressed() {
+        if (browseShown) { if (!browser.goBack()) showBrowser(null); return; }
         if (playerShown) { showPlayer(null); return; }
         web.evaluateJavascript("window.musyncBack ? window.musyncBack() : '0'", new ValueCallback<String>() {
             @Override
@@ -238,6 +280,57 @@ public class MainActivity extends Activity {
         }
         playerPanel.addView(playerStack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         root.addView(playerPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /**
+     * The panel where a person browses their own library on a music service's website.
+     * It sits behind musync's screen until asked for.
+     */
+    private void buildBrowsePanel() {
+        float dp = getResources().getDisplayMetrics().density;
+        browser = new LibraryBrowser(this, new LibraryBrowser.Listener() {
+            public void onPick(Map<String, Object> song) {
+                // The room screen knows which room this is and who is asking; hand the song to it.
+                web.evaluateJavascript("window.musyncAddDirect && window.musyncAddDirect(" + Json.write(song) + ")", null);
+            }
+        });
+        browsePanel = new LinearLayout(this);
+        browsePanel.setOrientation(LinearLayout.VERTICAL);
+        browsePanel.setBackgroundColor(Color.parseColor("#101011"));
+        browseBack = new TextView(this);
+        browseBack.setTextColor(Color.parseColor("#1A1606"));
+        browseBack.setBackgroundColor(Color.parseColor("#FFD23F"));
+        browseBack.setTextSize(15);
+        browseBack.setTypeface(browseBack.getTypeface(), android.graphics.Typeface.BOLD);
+        browseBack.setGravity(Gravity.CENTER_VERTICAL);
+        browseBack.setMaxLines(2);
+        browseBack.setPadding((int) (20 * dp), 0, (int) (20 * dp), 0);
+        browseBack.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { showBrowser(null); }
+        });
+        browsePanel.addView(browseBack, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (60 * dp)));
+        browsePanel.addView(browser.view(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(browsePanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /** Brings a service's library to the front, or with null goes back to musync's own screen. */
+    private void showBrowser(String appId) {
+        if (browsePanel == null) return;
+        WebPlayer w = appId == null || player == null ? null : player.webFor(appId);
+        browseShown = w != null;
+        if (w != null) {
+            browser.open(w.site);
+            browseBack.setText("\u2039  Done    Tap a song in " + w.site.name + " to add it to the queue");
+            browsePanel.bringToFront();
+        } else {
+            browser.close();
+            web.bringToFront();
+            // Signing in here also signs the built-in players in.
+            if (player != null) player.recheck();
+            web.evaluateJavascript("window.musyncRefresh && window.musyncRefresh()", null);
+        }
+        root.requestLayout();
+        root.invalidate();
     }
 
     /**
@@ -294,6 +387,29 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String playerKind(String appId) {
             return player != null && player.webFor(appId) != null ? "web" : "app";
+        }
+
+        /** The music services whose libraries can be browsed in this app, as a JSON list of ids. */
+        @JavascriptInterface
+        public String browsable() {
+            List<Object> ids = new ArrayList<Object>();
+            if (player != null) for (WebPlayer w : player.web) ids.add(w.site.id);
+            return Json.write(ids);
+        }
+
+        /** Opens the person's own library on a service, to add songs from it. */
+        @JavascriptInterface
+        public void browse(final String appId) {
+            runOnUiThread(new Runnable() { public void run() { showBrowser(appId); } });
+        }
+
+        /** The room screen reports what happened to a song picked while browsing; shown over the library. */
+        @JavascriptInterface
+        public void browseResult(final String text) {
+            if (text == null || text.length() > 200) return;
+            runOnUiThread(new Runnable() { public void run() {
+                try { android.widget.Toast.makeText(MainActivity.this, text, android.widget.Toast.LENGTH_SHORT).show(); } catch (RuntimeException ignored) { }
+            } });
         }
 
         /** For a built-in web player: "in" or "out" for signed in or not, "none" when no account is needed. */

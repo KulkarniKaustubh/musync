@@ -98,6 +98,40 @@ if (process.argv[4]) {
   check('Spotify: an advert is told apart from a song', r.ad === true, JSON.stringify(r));
 }
 
+// Browsing a library: a tap on a song is taken for the queue; everything else on the page still works.
+const browse = fs.readFileSync(dir + '/browse.js', 'utf8');
+const picks = async () => JSON.parse(await p.evaluate(browse)).adds;
+await p.unroute('https://music.youtube.com/**');
+await p.route('https://music.youtube.com/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: `<script>window.__nav = []; window.__played = 0;</script>
+<ytmusic-two-row-item-renderer><a id="pl" href="playlist?list=PL123" onclick="window.__nav.push('playlist'); return false;">Road trip</a></ytmusic-two-row-item-renderer>
+<ytmusic-responsive-list-item-renderer onclick="window.__played++"><div class="title"><a href="watch?v=abc_DEF-123&list=PL123">Mr. Brightside</a></div>
+<div class="secondary-flex-columns"><span>Song</span> • <a href="channel/UC1">The Killers</a> • <a href="browse/x">Hot Fuss</a> • 3:42</div><button id="menu">⋮</button></ytmusic-responsive-list-item-renderer>` }));
+await p.goto('https://music.youtube.com/library/playlists');
+await picks();
+await p.click('#pl');
+check('browsing YouTube Music: opening a playlist still works', (await p.evaluate(() => window.__nav.join())) === 'playlist' && (await picks()).length === 0);
+await p.click('ytmusic-responsive-list-item-renderer .title a');
+let got = await picks();
+check('browsing YouTube Music: a tapped song is taken with its id, title and artist',
+  got.length === 1 && got[0].app === 'ytm' && got[0].id === 'abc_DEF-123' && got[0].title === 'Mr. Brightside' && got[0].artist === 'The Killers', JSON.stringify(got));
+check('browsing YouTube Music: the tap does not play the song or leave the page', (await p.evaluate(() => window.__played)) === 0 && p.url().endsWith('/library/playlists'));
+await p.click('#menu'); await p.click('#menu');
+check('browsing: tapping the same song twice quickly adds it once', (await picks()).length === 0);
+
+await p.goto('https://open.spotify.com/collection/tracks');
+await picks();
+await p.click('[data-testid="tracklist-row"] >> nth=1');
+got = await picks();
+check('browsing Spotify: a tapped row is taken', got.length === 1 && got[0].app === 'spotify' && got[0].id === '7oK9VyNzrYvRFo7nQEYkWN' && got[0].title === 'Mr. Brightside (live)', JSON.stringify(got));
+await p.goto('https://m.soundcloud.com/you/library');
+await picks();
+await p.evaluate(() => document.addEventListener('click', (e) => e.preventDefault())); // keep the stand-in page in place
+await p.click('a[href="/the-killers/mr-brightside"]');
+got = await picks();
+check('browsing SoundCloud: a tapped track is taken', got.length === 1 && got[0].id === '/the-killers/mr-brightside' && got[0].title === 'Mr. Brightside', JSON.stringify(got));
+await p.click('a[href="/the-killers"]');
+check('browsing SoundCloud: an artist link is left alone', (await picks()).length === 0);
+
 await b.close();
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');
 process.exit(failed ? 1 : 0);

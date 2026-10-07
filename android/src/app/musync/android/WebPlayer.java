@@ -58,6 +58,8 @@ final class WebPlayer implements Room.Player {
         String clickFirst() { return null; }
         /** "in", "out", or "none" when the service plays without an account. */
         String signedIn() { return "none"; }
+        /** Where a signed-in person finds their own playlists and saved songs. */
+        String libraryUrl() { return home; }
         /** True when nothing plays until the person has signed in. */
         boolean needsAccount() { return false; }
         /** Where signing in starts, or null to use the front page. */
@@ -72,6 +74,7 @@ final class WebPlayer implements Room.Player {
 
     static final Site YOUTUBE_MUSIC = new Site("ytm", "YouTube Music", "https://music.youtube.com/", "ytm.probe.js") {
         String searchUrl(String q) { return home + "search?q=" + Uri.encode(q); }
+        String libraryUrl() { return home + "library/playlists"; }
         String playUrl(String pick, String localBase) { return home + "watch?v=" + pick; }
         String command(String what, long ms) {
             String act = what.equals("pause") ? "v.pause()" : what.equals("play") ? "v.play()"
@@ -341,9 +344,20 @@ final class WebPlayer implements Room.Player {
             try { room.playerRecheck(); } catch (RuntimeException ignored) { }
             return;
         }
-        status("starting", "Finding the song in " + site.name);
-        String q = (str(song.get("title")) + " " + str(song.get("artist"))).trim();
-        web.loadUrl(site.searchUrl(q));
+        // A song picked from someone's library on this very service comes with the
+        // service's own id: open exactly that track, no search.
+        Map<String, Object> direct = Json.obj(song.get("play"));
+        String directId = str(direct.get("id"));
+        if (site.id.equals(str(direct.get("app"))) && app.musync.core.Catalog.validDirect(site.id, directId)) {
+            pick = directId;
+            phase = LOAD;
+            status("starting", "Starting in " + site.name);
+            web.loadUrl(site.playUrl(pick, localBase));
+        } else {
+            status("starting", "Finding the song in " + site.name);
+            String q = (str(song.get("title")) + " " + str(song.get("artist"))).trim();
+            web.loadUrl(site.searchUrl(q));
+        }
         if (!polling) {
             polling = true;
             ui.postDelayed(poll, POLL_MS);

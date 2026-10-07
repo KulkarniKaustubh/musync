@@ -475,7 +475,13 @@ public final class RoomServer {
 
     private void act(Room room, Map<String, Object> b) throws Room.Denied, Halt {
         String token = Json.str(b.get("token")), type = Json.str(b.get("type")), key = Json.str(b.get("key"));
-        if (type.equals("add")) room.add(token, catalog.lookup(Json.str(b.get("ref"))), Json.str(b.get("app")));
+        if (type.equals("add") && b.get("song") != null) {
+            // Picked from the person's own library in a service: it plays there when the host's phone can.
+            Map<String, Object> song = Catalog.direct(Json.obj(b.get("song")));
+            if (song == null) throw new Halt(400, "That doesn’t look like a song. Try another one.");
+            room.add(token, song, Json.str(song.get("src")));
+        }
+        else if (type.equals("add")) room.add(token, catalog.lookup(Json.str(b.get("ref"))), Json.str(b.get("app")));
         else if (type.equals("seek")) room.seek(token, Json.num(b.get("ms")));
         else if (type.equals("bump")) room.bump(token, key);
         else if (type.equals("remove")) room.remove(token, key);
@@ -538,6 +544,7 @@ public final class RoomServer {
         if (p.endsWith(".png")) return "image/png";
         if (p.endsWith(".svg")) return "image/svg+xml";
         if (p.endsWith(".json")) return "application/json; charset=utf-8";
+        if (p.endsWith(".webmanifest")) return "application/manifest+json; charset=utf-8";
         return "text/plain; charset=utf-8";
     }
 

@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>musync</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href="icons/icon-192.png">
+<!-- Lets a phone keep musync on its home screen: "Add to Home Screen" on iPhone, "Install" on Android. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="musync">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#101011">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -22,7 +29,8 @@
       <input id="search-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off"
              spellcheck="false" placeholder="Songs or artists">
     </div>
-    <div class="chips" id="scope-chips" role="group" aria-label="Which catalog to search"></div>
+    <div class="chips" id="scope-chips" role="group" aria-label="Which service plays the song" hidden></div>
+    <div class="library-row" id="library-row" hidden></div>
   </form>
   <p class="sheet-note" id="search-note"></p>
   <ul class="list results" id="results" aria-live="polite"></ul>

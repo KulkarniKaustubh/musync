@@ -96,6 +96,12 @@
     const n = native();
     try { return n && n.webSignedIn ? n.webSignedIn(appId) : 'none'; } catch (_) { return 'none'; }
   };
+  /** In the musync app: the services whose libraries this person can browse on this phone. */
+  const browsable = () => {
+    const n = native();
+    try { const list = n && n.browsable ? JSON.parse(n.browsable()) : []; return Array.isArray(list) ? list : []; } catch (_) { return []; }
+  };
+  const onAndroidBrowser = () => !native() && /Android/i.test(navigator.userAgent);
   /** The music apps the host's phone can play right now. Empty when the room is not hosted from the phone app. */
   const services = () => playback().services || [];
   const playerKind = (appId) => {
@@ -805,6 +811,26 @@
       `<button type="button" class="chip" data-play-in="${esc(id)}" aria-pressed="${ui.playIn === id}">${esc(appName(id))}</button>`).join('');
   }
 
+  // Under the search box: a way into the person's own playlists. In the app that is
+  // the service's own website; in an Android browser it is a link into the app.
+  function renderLibrary() {
+    const box = $('#library-row');
+    const ids = browsable();
+    let html = '';
+    if (ids.length) {
+      const mine = myApp();
+      const order = ids.slice().sort((a, b) => (b === mine) - (a === mine));
+      html = `<span class="chips-label">From your library</span>` + order.map((id) =>
+        `<button type="button" class="btn btn-sm" data-browse="${esc(id)}">${ICON.open}${esc(appName(id))}</button>`).join('');
+    } else if (onAndroidBrowser() && ui.info.lan && /^http:\/\/\d+\.\d+\.\d+\.\d+(:\d+)?$/.test(location.origin)) {
+      const link = `musync://join?url=${encodeURIComponent(location.origin)}&code=${encodeURIComponent(roomCode())}`;
+      html = `<span class="chips-label">Have the musync app? Add from your own playlists there.</span>
+        <a class="btn btn-sm" href="${esc(link)}">${ICON.open}Open this room in the app</a>`;
+    }
+    box.hidden = !html;
+    box.innerHTML = html;
+  }
+
   function queueSearch(now) {
     const q = input.value.trim();
     clearTimeout(searchTimer);
@@ -877,6 +903,7 @@
     input.value = '';
     ui.search = { q: '', loading: false, songs: [], failed: [], error: '' };
     renderChips();
+    renderLibrary();
     renderResults();
     searchSheet.showModal();
     input.focus();
@@ -1036,6 +1063,21 @@
 
   // The Android app calls this for the system back button. "1" means the press
   // was used here; "0" lets the app go to the background.
+  // The Android app calls this with a song the person tapped while browsing their own
+  // library on a service's website. The song carries that service's own id.
+  window.musyncAddDirect = async (song) => {
+    const say = (text) => { try { const n = native(); if (n && n.browseResult) n.browseResult(text); else toast(text); } catch (_) { /* nothing to tell */ } };
+    if (!song || typeof song !== 'object') return;
+    if (!ui.room) return say('Join a room first, then add songs from your library.');
+    try {
+      await api(`/api/rooms/${ui.room.code}/act`, { token: device.token, type: 'add', song });
+      ui.justAdded = song.app + ':' + song.id;
+      say(`Added “${song.title}”`);
+    } catch (e) {
+      say(e.message);
+    }
+  };
+
   // The Android app calls this after the person comes back from a service's web player.
   window.musyncRefresh = () => { refresh(true); };
 
@@ -1103,6 +1145,7 @@
     }
     if (t.id === 'tap-sound') { ui.needsTap = false; player.play().catch(() => {}); syncPlayer(); return refresh(true); }
     if (t.id === 'grant-access') return native() && native().requestMediaAccess();
+    if (d.browse) return native() && native().browse && native().browse(d.browse);
     if (d.showPlayer) return native() && native().showWebPlayer && native().showWebPlayer(d.showPlayer);
     if (d.skipSignin) {
       if (!device.skipSignIn.includes(d.skipSignin)) device.skipSignIn.push(d.skipSignin);

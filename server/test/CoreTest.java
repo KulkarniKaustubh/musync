@@ -179,6 +179,21 @@ public class CoreTest {
         check("if the phone's owner stops being host, their app stops and the room returns to previews",
             calls.get(calls.size() - 1).startsWith("silence") && "preview".equals(Json.obj(f.state().get("playback")).get("mode")));
 
+        // Songs picked from a person's own library arrive from a web page, so nothing in them is trusted.
+        Map<String, Object> picked = Catalog.direct(Json.map("app", "ytm", "id", "dQw4w9WgXcQ", "title", " Never <b>Gonna</b>  Give You Up ", "artist", "Rick Astley", "art", "javascript:alert(1)"));
+        check("a library pick becomes a song the room can queue", picked != null && "ytm:dQw4w9WgXcQ".equals(picked.get("ref"))
+            && "Never b Gonna /b Give You Up".equals(picked.get("title")) && "ytm".equals(Json.obj(picked.get("play")).get("app")));
+        check("its picture can only be a plain https address", picked.get("art").toString().startsWith("https://i.ytimg.com/vi/dQw4w9WgXcQ/"));
+        check("a pick with an id of the wrong shape is refused", Catalog.direct(Json.map("app", "ytm", "id", "x&list=evil", "title", "t")) == null
+            && Catalog.direct(Json.map("app", "spotify", "id", "../../login", "title", "t")) == null
+            && Catalog.direct(Json.map("app", "soundcloud", "id", "/a/b?x=1", "title", "t")) == null
+            && Catalog.direct(Json.map("app", "tidal", "id", "123456", "title", "t")) == null);
+        check("a pick without a title is refused", Catalog.direct(Json.map("app", "spotify", "id", "003vvx7Niy0yvhvHt4a68B", "title", "  ")) == null);
+        Room lib = new Room("LIBR");
+        lib.join("lib-token-0123456789abc", "Maya", "spotify");
+        lib.add("lib-token-0123456789abc", Catalog.direct(Json.map("app", "soundcloud", "id", "/the-killers/mr-brightside", "title", "Mr. Brightside", "artist", "The Killers")), "soundcloud");
+        check("a library pick is queued under the service it came from", "soundcloud".equals(Json.obj(Json.obj(lib.state().get("now")).get("song")).get("src")));
+
         System.out.println(failed == 0 ? "\nAll checks passed" : "\n" + failed + " check(s) failed");
         System.exit(failed == 0 ? 0 : 1);
     }

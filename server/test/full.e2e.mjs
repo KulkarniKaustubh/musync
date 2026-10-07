@@ -22,7 +22,10 @@ async function page(nativeStub) {
       // Spotify plays that way too, but only once signed in.
       playerKind: (a) => (a === 'ytm' || a === 'soundcloud' || a === 'spotify' ? 'web' : 'app'),
       webSignedIn: (a) => (a === 'ytm' ? (window.__signedIn ? 'in' : 'out') : a === 'spotify' ? 'out' : 'none'),
-      showWebPlayer: (a) => window.__calls.push('showWebPlayer ' + a) };
+      showWebPlayer: (a) => window.__calls.push('showWebPlayer ' + a),
+      // The app can show each of those services' own sites for browsing a library.
+      browsable: () => '["ytm","soundcloud","spotify"]', browse: (a) => window.__calls.push('browse ' + a),
+      browseResult: (t) => window.__calls.push('result ' + t) };
   });
   return p;
 }
@@ -102,9 +105,58 @@ check('the room sheet lists what this phone plays', svc.includes('This phone pla
 check('a service that needs an account offers sign-in there', svc.includes('Sign in to play Spotify songs here') && await host.locator('#people-body [data-show-player="spotify"]').count() === 1);
 if (shots) await host.screenshot({ path: `${shots}/full-services.png` });
 await host.click('#people-sheet [data-close]');
+
+// Adding from your own library, in the app.
 await host.click('#open-search');
+const lib = await host.locator('#library-row').innerText();
+check('the app offers the person’s own library, their service first', lib.replace(/\s+/g, ' ').includes('From your library YouTube Music'));
 if (shots) await host.screenshot({ path: `${shots}/full-search.png` });
+await host.click('[data-browse="soundcloud"]');
+check('choosing a service opens its library', (await host.evaluate(() => window.__calls)).includes('browse soundcloud'));
 await host.click('#search-sheet [data-close]');
+// The app hands over a song the person tapped on the service's site.
+await host.evaluate(() => window.musyncAddDirect({ app: 'soundcloud', id: '/odesza/a-moment-apart', title: 'A Moment Apart', artist: 'ODESZA' }));
+await guest.waitForFunction(() => [...document.querySelectorAll('[data-slot="queue"] .row-title')].some((e) => e.textContent === 'A Moment Apart'));
+check('a song tapped in the library joins the queue for everyone', true);
+check('it is marked to play in the service it came from', (await guest.locator('[data-slot="queue"] .row:has-text("A Moment Apart") .row-pick').innerText()).includes('SoundCloud'));
+check('the person browsing is told it was added', (await host.evaluate(() => window.__calls)).includes('result Added “A Moment Apart”'));
+await host.evaluate(() => window.musyncAddDirect({ app: 'soundcloud', id: '/odesza/a-moment-apart', title: 'A Moment Apart', artist: 'ODESZA' }));
+await host.waitForFunction(() => window.__calls.some((c) => c.startsWith('result That song is already')));
+check('adding it twice says why not', true);
+await host.evaluate(() => window.musyncAddDirect({ app: 'soundcloud', id: 'https://evil.example/x', title: 'Nope', artist: '' }));
+await host.waitForFunction(() => window.__calls.some((c) => c.startsWith('result That doesn’t look like a song')));
+check('something that is not a track is refused', true);
+await guest.click('#open-search');
+check('in a browser there is no library row', await guest.locator('#library-row').isHidden());
+await guest.click('#search-sheet [data-close]');
+// Someone on an Android phone who scanned the code into their browser is pointed to the app.
+const actx = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', reducedMotion: 'reduce',
+  userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36' });
+const android = await actx.newPage();
+await android.goto(link.replace('#join=X', '#join=' + (await host.locator('[data-slot="code"]').innerText()).trim()));
+await android.waitForSelector('#setup-form');
+await setup(android, 'Priya', 'Spotify');
+await android.click('#open-search');
+const appLink = await android.locator('#library-row a').getAttribute('href');
+check('an Android browser guest gets a link that opens this room in the app',
+  /^musync:\/\/join\?url=http%3A%2F%2F[\d.]+%3A8791&code=[A-Z0-9]{4}$/.test(appLink || ''), appLink);
+if (shots) await android.screenshot({ path: `${shots}/full-android-browser.png` });
+// An iPhone gets the same room in its browser, and can keep it on the home screen.
+const ictx = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', reducedMotion: 'reduce',
+  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
+const iphone = await ictx.newPage();
+await iphone.goto(link.replace('#join=X', '#join=' + (await host.locator('[data-slot="code"]').innerText()).trim()));
+await iphone.waitForSelector('#setup-form');
+await setup(iphone, 'Sam', 'Apple Music');
+await add(iphone, 'dream', 1);
+await host.waitForFunction(() => [...document.querySelectorAll('[data-slot="queue"] .row-pick')].some((e) => e.textContent.includes('Sam')));
+check('an iPhone browser guest can join and add a song', true);
+await iphone.click('#open-search');
+check('an iPhone is not offered an Android app', await iphone.locator('#library-row').isHidden());
+const man = await (await fetch('http://localhost:8791/manifest.webmanifest')).json();
+const touch = await fetch('http://localhost:8791/icons/apple-touch-icon.png');
+check('the room can be kept on a phone’s home screen', man.display === 'standalone' && touch.ok && touch.headers.get('content-type') === 'image/png'
+  && await iphone.locator('link[rel="apple-touch-icon"]').count() === 1);
 
 // --- the phone has not been given access yet ---
 const fresh = await page(true);

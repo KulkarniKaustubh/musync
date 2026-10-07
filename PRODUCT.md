@@ -60,7 +60,7 @@ Confirmed:
 Terminology: room, room code, queue, add, bump (move a song up), pick
 ("Maya's pick").
 
-Built in version 0.5 (see README for what is tested):
+Built in version 0.7 (see README for what is tested):
 
 - The host's phone runs the room and serves it to everyone on the same Wi-Fi.
   A standalone server covers people who are apart.
@@ -71,6 +71,9 @@ Built in version 0.5 (see README for what is tested):
 - A song plays in the service its picker uses when the host's phone can play
   it, otherwise in the host's. All songs in one service play from the one
   account signed in on the host's phone.
+- In the Android app a person can browse their own playlists on their own
+  service, signed in on their own phone, and add songs from them. People
+  without the app join in a browser (Android or iPhone) and add by search.
 - The host can pause, skip, and move through the song. Anyone can add and
   bump; a person can skip or remove their own. These rules were chosen to get
   a working version and are open to change.

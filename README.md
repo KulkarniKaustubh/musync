@@ -29,6 +29,19 @@ One shared music queue that everyone in the room adds to from their own phone.
   person who added it uses, when the host's phone can play that service;
   otherwise in the host's. When the phone can play more than one, the search
   sheet asks which. The room sheet lists what the phone plays.
+- **Add from your own playlists (0.7.0).** In the Android app, "Add a song"
+  has a "From your library" row. It opens the service's own website inside
+  musync, signed in as you, on your phone. Browse to a playlist and tap a
+  song: it joins the room's queue instead of playing. The song carries the
+  service's own id, so the host's phone opens exactly that track when it can
+  play that service, and finds it by title and artist otherwise. Your sign-in
+  stays on your phone. Tested against stand-in pages only; which rows count
+  as "a song" on each real site is the part most likely to need adjusting.
+- **App or browser.** Scanning the room's QR code opens the room in the
+  phone's browser, on Android or iPhone: join, search, add, bump. On Android
+  the browser offers "Open this room in the app" for people who have musync
+  installed and want their own playlists. The room can also be added to a
+  phone's home screen from the browser.
 - **The clock follows the music.** A song's timer starts when the player
   reports it is audible and is corrected if playback drifts. The host can drag
   through the song.
@@ -97,6 +110,30 @@ version 0.3.1; it installs alongside that one, so uninstall "syng" first.
    again.
 4. Add a song. If the music app has not been opened since the phone started,
    musync opens it once to wake it up.
+
+## iPhone
+
+There is no iPhone app. An iPhone joins a room in Safari by scanning the QR
+code, and can search, add and bump like anyone else; "Add to Home Screen"
+keeps the room as an icon. This has not been run on an iPhone.
+
+What an iPhone app would need, and how the code is laid out for it:
+
+- The whole interface is the web client in `web/`. A shell app only has to
+  show it in a web view.
+- Everything the client asks of the app goes through one object,
+  `window.MusyncNative` (see `Bridge` in `MainActivity.java`): `browsable`,
+  `browse`, `browseResult`, `playerKind`, `webSignedIn`, `showWebPlayer`,
+  `keepAwake`, `open`. The client works without it and shows more with it.
+  An iPhone shell would provide the same object from Swift.
+- Browsing a library and playing in a hidden web player are scripts in
+  `web/players/` that run inside the service's page. They are not tied to
+  Android; iOS web views can run the same scripts.
+- Hosting a room on an iPhone is the missing piece: the room server is Java.
+  An iPhone could host by pointing the shell at a room server running
+  elsewhere, or the server would need porting.
+- Building and installing an iPhone app needs a Mac with Xcode and an Apple
+  developer account.
 
 ## Run the server on a computer
 

@@ -27,6 +27,49 @@ public abstract class Catalog {
                 "album", album, "art", art, "artBig", artBig, "preview", preview, "url", url, "ms", ms);
     }
 
+    /**
+     * A track picked straight from a person's own library in a music service,
+     * known by that service's own id, so the host's player can open exactly
+     * that track without searching. Everything here comes from a web page the
+     * person was browsing, so nothing is trusted: the id must have the
+     * service's shape and the text is cleaned. Returns null when it does not
+     * describe a track.
+     */
+    public static Map<String, Object> direct(Map<String, Object> in) {
+        String app = Json.str(in.get("app")), id = Json.str(in.get("id"));
+        if (!validDirect(app, id)) return null;
+        String title = tidy(Json.str(in.get("title")), 120), artist = tidy(Json.str(in.get("artist")), 120);
+        if (title.length() == 0) return null;
+        String art = Json.str(in.get("art"));
+        if (!art.startsWith("https://") || art.length() > 400 || art.matches(".*[\\s\"'<>\\\\].*")) art = "";
+        String url;
+        if (app.equals("ytm")) {
+            url = "https://music.youtube.com/watch?v=" + id;
+            if (art.length() == 0) art = "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg";
+        } else if (app.equals("spotify")) {
+            url = "https://open.spotify.com/track/" + id;
+        } else {
+            url = "https://soundcloud.com" + id;
+        }
+        Map<String, Object> song = song(app, id, title, artist, "", art, art, "", url, 0);
+        song.put("play", Json.map("app", app, "id", id));
+        return song;
+    }
+
+    /** Whether an id has the shape the given service uses for a track. */
+    public static boolean validDirect(String app, String id) {
+        if (app == null || id == null) return false;
+        if (app.equals("ytm")) return id.matches("[A-Za-z0-9_-]{6,20}");
+        if (app.equals("spotify")) return id.matches("[A-Za-z0-9]{22}");
+        if (app.equals("soundcloud")) return id.matches("/[A-Za-z0-9_-]{1,80}/[A-Za-z0-9_-]{1,120}");
+        return false;
+    }
+
+    private static String tidy(String s, int max) {
+        s = s.replaceAll("[\\p{Cntrl}<>]", " ").trim().replaceAll("\\s+", " ");
+        return s.length() > max ? s.substring(0, max).trim() : s;
+    }
+
     public static final class Result {
         public final List<Map<String, Object>> songs = new ArrayList<Map<String, Object>>();
         /** Sources that could not be reached, if any. */
