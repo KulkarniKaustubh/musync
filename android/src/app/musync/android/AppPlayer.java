@@ -70,6 +70,13 @@ final class AppPlayer implements Room.Player {
     private boolean sent, warned, polling;
     private String trackId;
     private long duration;
+    // How the current song is being started, kept so a failure can say what was tried.
+    private int step;              // 0 structured search sent, 1 plain search sent, 2 app opened with the song
+    private int requests;
+    private String beforeId;       // what the app had loaded before we asked
+    private boolean viaBrowser;
+    /** Apps that ignored search requests through their session; for these, go straight to opening them. */
+    private final java.util.Set<String> ignoresSession = new java.util.HashSet<String>();
 
     AppPlayer(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -184,12 +191,25 @@ final class AppPlayer implements Room.Player {
         warned = false;
         trackId = null;
         duration = 0;
+        step = 0;
+        requests = 0;
+        beforeId = null;
+        viaBrowser = false;
         status("starting", "Starting in " + nameOf(app));
         String pkg = packageOf(app);
         MediaController c = findSession(pkg);
         if (c != null) {
             controller = c;
-            send(c);
+            try {
+                MediaMetadata md = c.getMetadata();
+                beforeId = md == null ? null : idOf(md);
+            } catch (RuntimeException ignored) { }
+            if (ignoresSession.contains(app) && foreground) {
+                step = 2;
+                openWithSong(pkg);
+            } else {
+                send(c);
+            }
         } else {
             connectBrowser(pkg);
         }
@@ -219,6 +239,7 @@ final class AppPlayer implements Room.Player {
         try {
             c.getTransportControls().playFromSearch(query(), describe());
             sent = true;
+            requests++;
         } catch (RuntimeException e) {
             status("failed", nameOf(app) + " refused the request (" + e.getClass().getSimpleName() + ").");
         }
@@ -253,6 +274,7 @@ final class AppPlayer implements Room.Player {
                     if (forKey == null || !forKey.equals(key) || browser == null) return;
                     try {
                         controller = new MediaController(ctx, browser.getSessionToken());
+                        viaBrowser = true;
                         send(controller);
                     } catch (RuntimeException e) {
                         launchOrAsk(pkg);
@@ -276,20 +298,54 @@ final class AppPlayer implements Room.Player {
      */
     private void launchOrAsk(String pkg) {
         if (sent) return;
-        String name = nameOf(app);
-        if (foreground) {
-            try {
-                Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
-                i.setPackage(pkg);
-                i.putExtras(describe());
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                ctx.startActivity(i);
-                sent = true;
-                status("starting", "Opened " + name + " to start the song. Come back to musync once it plays.");
-                return;
-            } catch (RuntimeException ignored) { }
+        if (foreground && openWithSong(pkg)) return;
+        status("needs-open", "Open " + nameOf(app) + " once so musync can start songs in it.");
+    }
+
+    /**
+     * Asks the music app's own screen to play the song, the way a voice
+     * assistant does. Returns false if Android or the app would not take it.
+     */
+    private boolean openWithSong(String pkg) {
+        try {
+            Intent i = new Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH);
+            i.setPackage(pkg);
+            i.putExtras(describe());
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            sent = true;
+            requests++;
+            step = 2;
+            commandAt = SystemClock.elapsedRealtime(); // the app needs a fresh moment to load
+            warned = false;
+            status("starting", "Opened " + nameOf(app) + " to start the song. Come back to musync once it plays.");
+            return true;
+        } catch (RuntimeException e) {
+            return false;
         }
-        status("needs-open", "Open " + name + " once so musync can start songs in it.");
+    }
+
+    /** What the music app is doing, in words, for the message shown when a song will not start. */
+    private String report(int state, MediaMetadata md, long pos) {
+        String what;
+        switch (state) {
+            case PlaybackState.STATE_PLAYING: what = "playing"; break;
+            case PlaybackState.STATE_PAUSED: what = "paused"; break;
+            case PlaybackState.STATE_BUFFERING: what = "loading"; break;
+            case PlaybackState.STATE_CONNECTING: what = "connecting"; break;
+            case PlaybackState.STATE_ERROR: what = "showing an error"; break;
+            case PlaybackState.STATE_STOPPED: what = "stopped"; break;
+            case PlaybackState.STATE_NONE: what = "idle"; break;
+            default: what = "busy (state " + state + ")";
+        }
+        String title = md == null ? null : md.getString(MediaMetadata.METADATA_KEY_TITLE);
+        String err = "";
+        try {
+            PlaybackState st = controller == null ? null : controller.getPlaybackState();
+            if (st != null && st.getErrorMessage() != null) err = " It says: " + st.getErrorMessage() + ".";
+        } catch (RuntimeException ignored) { }
+        return nameOf(app) + " is " + what + (title == null ? " with nothing loaded" : " on “" + title + "” at " + (pos / 1000) + "s") + "." + err
+            + " (asked " + requests + "×" + (viaBrowser ? ", woke the app" : ", app was running") + (step >= 2 ? ", opened it" : "") + ")";
     }
 
     private final Runnable poll = new Runnable() {
@@ -324,7 +380,30 @@ final class AppPlayer implements Room.Player {
 
         if (phase == STARTING) {
             boolean playing = state == PlaybackState.STATE_PLAYING;
-            if (playing && md != null && age > 700 && pos < 20000 && (matches(md) || age > 4000)) {
+            String nowIs = md == null ? null : idOf(md);
+            boolean changed = nowIs != null && !nowIs.equals(beforeId);
+            // Started means: playing, and either it is the song we asked for, or the app
+            // moved to a different track than it had before and is near that track's start.
+            boolean started = playing && md != null && age > 700
+                && (matches(md) || (changed && pos < 20000 && age > 2500) || (beforeId == null && pos < 20000 && age > 4000));
+            if (!started && step == 0 && age > 3500 && controller != null) {
+                // Some apps only understand a plain search with no extra description.
+                step = 1;
+                try {
+                    controller.getTransportControls().playFromSearch(query(), new Bundle());
+                    requests++;
+                } catch (RuntimeException ignored) { }
+            } else if (!started && step == 1 && age > 7500) {
+                // The app is not answering through its session. Ask its own screen instead.
+                step = 2;
+                ignoresSession.add(app);
+                if (!foreground || !openWithSong(packageOf(app))) {
+                    warned = true;
+                    status("failed", nameOf(app) + " didn’t start the song. Keep musync on screen and tap Try again. " + report(state, md, pos));
+                }
+                return;
+            }
+            if (started) {
                 phase = PLAYING;
                 trackId = idOf(md);
                 duration = md.getLong(MediaMetadata.METADATA_KEY_DURATION);
@@ -332,9 +411,9 @@ final class AppPlayer implements Room.Player {
                 String actual = md.getString(MediaMetadata.METADATA_KEY_TITLE);
                 status("ok", matches(md) || actual == null ? "" : nameOf(app) + " picked “" + actual + "” for this search.");
                 if (paused) controller.getTransportControls().pause();
-            } else if (age > 12000 && !warned) {
+            } else if (age > 15000 && !warned) {
                 warned = true;
-                status("failed", nameOf(app) + " didn’t start the song. Open " + nameOf(app) + ", then tap Try again.");
+                status("failed", nameOf(app) + " didn’t start the song. " + report(state, md, pos));
             }
             return;
         }

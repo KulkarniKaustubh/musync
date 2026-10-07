@@ -449,13 +449,16 @@
     }
     if (!fullMode()) return '30-second preview';
     const whose = isHost() ? 'your' : nameOf(ui.room.hostId) + '’s';
+    const st = playback().status;
+    if (st === 'failed' || st === 'needs-open') return `Not playing yet in ${whose} ${appName(playback().app)}`;
+    if (st === 'starting') return `Starting in ${whose} ${appName(playback().app)}`;
     return `Playing in ${whose} ${appName(playback().app)}`;
   }
 
   /** Anything the host needs to know or do about playback, shown under the song. */
   function playbackNote() {
     const pb = playback();
-    if (!fullMode() || !pb.detail || pb.status === 'starting') return '';
+    if (!fullMode() || !pb.detail) return '';
     let action = '';
     if (isHost() && native()) {
       if (pb.status === 'needs-open') action = `<button type="button" class="btn btn-sm" id="open-music-app">Open ${esc(appName(pb.app))}</button>`;
